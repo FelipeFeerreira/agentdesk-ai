@@ -1,6 +1,12 @@
 import { prisma } from "@/lib/db";
 import type { WorkflowRun, WorkflowType } from "@prisma/client";
-import { triggerN8n } from "./n8n";
+import { dispatchAutomationEvent } from "./n8n";
+import {
+  buildAutomationEvent,
+  jobTypeToEventType,
+  type AutomationEvent,
+} from "./events";
+import { audit } from "@/lib/observability/audit";
 
 /**
  * Minimal, database-backed background job runner.
@@ -121,8 +127,31 @@ export async function processJob(runId: string): Promise<WorkflowRun> {
 async function executeHandler(
   run: WorkflowRun,
 ): Promise<{ demo: boolean } | "REVIEW"> {
-  const payload = (JSON.parse(run.payload) || {}) as Record<string, unknown>;
-  const result = await triggerN8n(run.type, { orgId: run.orgId, ...payload });
+  const raw = (JSON.parse(run.payload) || {}) as Record<string, unknown>;
+  const eventType = jobTypeToEventType(run.type);
+
+  // Jobs without an automation contract (e.g. GENERIC) are considered no-ops.
+  if (!eventType) return { demo: true };
+
+  // Validate the payload against the event contract before dispatching.
+  let event: AutomationEvent;
+  try {
+    event = buildAutomationEvent(eventType, run.orgId, raw);
+  } catch (e) {
+    await audit(run.orgId, {
+      event: "automation.invalid_payload",
+      integration: "N8N",
+      status: "FAILED",
+      metadata: {
+        jobType: run.type,
+        eventType,
+        error: e instanceof Error ? e.message : "invalid payload",
+      },
+    });
+    return "REVIEW";
+  }
+
+  const result = await dispatchAutomationEvent(event);
   return { demo: result.demo };
 }
 
