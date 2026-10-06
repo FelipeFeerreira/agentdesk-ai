@@ -1,0 +1,28 @@
+# Production PostgreSQL with pgvector for AgentDesk AI.
+# Local/demo development uses SQLite (no Docker required) — see README.
+#
+# Usage:
+#   docker compose up -d db
+#   # then point DATABASE_URL at postgresql://agentdesk:agentdesk@localhost:5432/agentdesk
+#   npx prisma migrate deploy   # after generating migrations from prisma/schema.postgresql.prisma
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: agentdesk-postgres
+    environment:
+      POSTGRES_USER: agentdesk
+      POSTGRES_PASSWORD: agentdesk
+      POSTGRES_DB: agentdesk
+    ports:
+      - "5432:5432"
+    volumes:
+      - agentdesk_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentdesk"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  agentdesk_pgdata:

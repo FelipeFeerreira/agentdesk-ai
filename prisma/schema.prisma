@@ -1,0 +1,511 @@
+// AgentDesk AI — data model
+//
+// Local/demo development uses SQLite (zero external dependencies) so the whole
+// application is runnable immediately. Production uses PostgreSQL + pgvector;
+// see prisma/schema.postgresql.prisma and docker-compose.yml.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  AGENT
+}
+
+enum Channel {
+  WEB
+  WHATSAPP
+}
+
+enum ConversationStatus {
+  AI_ACTIVE
+  WAITING
+  RESOLVED
+  NEEDS_HUMAN_REVIEW
+  HUMAN_ACTIVE
+  ESCALATED
+}
+
+enum MessageRole {
+  CUSTOMER
+  ASSISTANT
+  SYSTEM
+  HUMAN
+}
+
+enum LeadStatus {
+  NEW
+  UNQUALIFIED
+  NEEDS_MORE_INFO
+  QUALIFIED
+  MEETING_SCHEDULED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum DocType {
+  PDF
+  TEXT
+  MARKDOWN
+  MANUAL
+}
+
+enum DocStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum IntegrationType {
+  OPENAI
+  HUBSPOT
+  WHATSAPP
+  N8N
+  GOOGLE_DRIVE
+}
+
+enum IntegrationMode {
+  DEMO
+  LIVE
+}
+
+enum WorkflowStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRYING
+  DEAD
+  NEEDS_REVIEW
+}
+
+enum WorkflowType {
+  CRM_SYNC
+  LEAD_QUALIFICATION
+  SUPPORT_ESCALATION
+  KB_INGESTION
+  FOLLOW_UP
+  WHATSAPP_SEND
+  TICKET_CREATE
+  GENERIC
+}
+
+enum EscalationStatus {
+  OPEN
+  APPROVED
+  REJECTED
+  RESOLVED
+}
+
+enum AuditStatus {
+  SUCCESS
+  FAILED
+  RETRYING
+  SKIPPED
+  NEEDS_REVIEW
+}
+
+enum ToolCallStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum EvalRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum EvalCaseStatus {
+  PASSED
+  FAILED
+  SKIPPED
+}
+
+// ---------------------------------------------------------------------------
+// Core entities
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  settings  String   @default("{}") // JSON: see lib/settings for shape
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users            User[]
+  customers        Customer[]
+  orders           Order[]
+  conversations    Conversation[]
+  leads            Lead[]
+  tickets          Ticket[]
+  documents        KnowledgeDocument[]
+  chunks           KnowledgeChunk[]
+  integrations     Integration[]
+  workflowRuns     WorkflowRun[]
+  escalations      Escalation[]
+  auditLogs        AuditLog[]
+  evaluationRuns   EvaluationRun[]
+  evaluationCases  EvaluationCase[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  orgId        String
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role     @default(AGENT)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  ownedConversations Conversation[] @relation("ConversationOwner")
+  assignedTickets    Ticket[]        @relation("TicketAssignee")
+  escalationDecisions Escalation[]
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  orgId      String
+  externalId String?  @unique
+  name       String
+  email      String?
+  phone      String?
+  whatsappId String?
+  company    String?
+  companySize Int?
+  metadata   String   @default("{}")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  conversations Conversation[]
+  orders        Order[]
+  leads         Lead[]
+  tickets       Ticket[]
+
+  @@unique([orgId, email])
+  @@index([orgId])
+}
+
+model Order {
+  id          String   @id @default(cuid())
+  orgId       String
+  customerId  String
+  orderNumber String
+  status      String // e.g. PROCESSING, SHIPPED, DELIVERED, REFUNDED
+  totalCents  Int
+  currency    String   @default("USD")
+  placedAt    DateTime
+  items       String   @default("[]") // JSON
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org      Organization @relation(fields: [orgId], references: [id])
+  customer Customer     @relation(fields: [customerId], references: [id])
+
+  @@unique([orgId, orderNumber])
+  @@index([customerId])
+}
+
+model Conversation {
+  id              String             @id @default(cuid())
+  orgId           String
+  customerId      String
+  channel         Channel            @default(WEB)
+  status          ConversationStatus @default(AI_ACTIVE)
+  ownerUserId     String?
+  intent          String?
+  aiConfidence    Float?
+  escalationReason String?
+  tags            String             @default("[]") // JSON string[]
+  resolvedAt      DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  org      Organization @relation(fields: [orgId], references: [id])
+  customer Customer     @relation(fields: [customerId], references: [id])
+  owner    User?        @relation("ConversationOwner", fields: [ownerUserId], references: [id])
+
+  messages    Message[]
+  toolCalls   ToolCall[]
+  lead        Lead?
+  tickets     Ticket[]
+  escalations Escalation[]
+
+  @@index([orgId, status])
+  @@index([customerId])
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String
+  role           MessageRole
+  content        String
+  toolCallId     String?
+  metadata       String      @default("{}") // delivery/read status, channel ids
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  toolCall     ToolCall?    @relation(fields: [toolCallId], references: [id])
+
+  @@index([conversationId, createdAt])
+}
+
+model ToolCall {
+  id             String         @id @default(cuid())
+  conversationId String
+  name           String
+  arguments      String         @default("{}") // JSON
+  result         String?        // JSON
+  status         ToolCallStatus @default(PENDING)
+  error          String?
+  durationMs     Int?
+  createdAt      DateTime       @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  messages     Message[]
+
+  @@index([conversationId])
+}
+
+model Lead {
+  id             String     @id @default(cuid())
+  orgId          String
+  customerId     String
+  conversationId String?    @unique
+  status         LeadStatus @default(NEW)
+  score          Int?
+  name           String?
+  email          String?
+  company        String?
+  companySize    Int?
+  problem        String?
+  solution       String?
+  budgetRange    String?
+  timeline       String?
+  notes          String?
+  qualifiedAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  org          Organization  @relation(fields: [orgId], references: [id])
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  conversation Conversation? @relation(fields: [conversationId], references: [id])
+
+  @@index([orgId, status])
+}
+
+model Ticket {
+  id             String         @id @default(cuid())
+  orgId          String
+  customerId     String
+  conversationId String?
+  subject        String
+  description    String
+  status         TicketStatus   @default(OPEN)
+  priority       TicketPriority @default(MEDIUM)
+  assigneeUserId String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  org          Organization  @relation(fields: [orgId], references: [id])
+  customer     Customer      @relation(fields: [customerId], references: [id])
+  conversation Conversation? @relation(fields: [conversationId], references: [id])
+  assignee     User?         @relation("TicketAssignee", fields: [assigneeUserId], references: [id])
+
+  @@index([orgId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge base
+// ---------------------------------------------------------------------------
+
+model KnowledgeDocument {
+  id        String    @id @default(cuid())
+  orgId     String
+  title     String
+  source    String // filename or "manual"
+  type      DocType   @default(MANUAL)
+  status    DocStatus @default(PENDING)
+  mimeType  String?
+  sizeBytes Int?
+  error     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  org    Organization      @relation(fields: [orgId], references: [id])
+  chunks KnowledgeChunk[]
+
+  @@index([orgId, status])
+}
+
+model KnowledgeChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  orgId      String
+  content    String
+  index      Int
+  embedding  String   @default("[]") // JSON number[] — see lib/vectorstore
+  metadata   String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id])
+  org      Organization      @relation(fields: [orgId], references: [id])
+
+  @@index([documentId])
+}
+
+// ---------------------------------------------------------------------------
+// Integrations & automation
+// ---------------------------------------------------------------------------
+
+model Integration {
+  id          String          @id @default(cuid())
+  orgId       String
+  type        IntegrationType
+  mode        IntegrationMode @default(DEMO)
+  isConfigured Boolean         @default(false)
+  config      String          @default("{}") // non-secret config only
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@unique([orgId, type])
+}
+
+model WorkflowRun {
+  id              String         @id @default(cuid())
+  orgId           String
+  type            WorkflowType
+  status          WorkflowStatus @default(PENDING)
+  payload         String         @default("{}") // JSON
+  result          String?
+  error           String?
+  attempts        Int            @default(0)
+  maxAttempts     Int            @default(3)
+  idempotencyKey  String?        @unique
+  nextRunAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, status])
+  @@index([nextRunAt])
+}
+
+model Escalation {
+  id             String           @id @default(cuid())
+  orgId          String
+  conversationId String
+  reason         String
+  proposedAction String?          // JSON
+  aiSummary      String           @default("")
+  status         EscalationStatus @default(OPEN)
+  decidedByUserId String?
+  decidedAt      DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  org          Organization  @relation(fields: [orgId], references: [id])
+  conversation Conversation  @relation(fields: [conversationId], references: [id])
+  decidedBy    User?         @relation(fields: [decidedByUserId], references: [id])
+
+  @@index([orgId, status])
+}
+
+model AuditLog {
+  id             String      @id @default(cuid())
+  orgId          String
+  event          String
+  integration    String? // OPENAI | HUBSPOT | WHATSAPP | N8N | RAG | CORE ...
+  conversationId String?
+  status         AuditStatus
+  durationMs     Int?
+  retryCount     Int         @default(0)
+  metadata       String      @default("{}") // sanitized, no secrets
+  createdAt      DateTime    @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@index([orgId, createdAt])
+  @@index([orgId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Evaluation
+// ---------------------------------------------------------------------------
+
+model EvaluationRun {
+  id          String        @id @default(cuid())
+  orgId       String
+  name        String
+  status      EvalRunStatus @default(PENDING)
+  totalCases  Int           @default(0)
+  passedCases Int           @default(0)
+  metrics     String        @default("{}") // JSON aggregate metrics
+  createdAt   DateTime      @default(now())
+  completedAt DateTime?
+
+  org   Organization    @relation(fields: [orgId], references: [id])
+  cases EvaluationCase[]
+
+  @@index([orgId, createdAt])
+}
+
+model EvaluationCase {
+  id                 String         @id @default(cuid())
+  runId              String?
+  orgId              String
+  name               String
+  category           String
+  input              String
+  expectedIntent     String?
+  expectedTool       String?
+  expectedEscalate   Boolean        @default(false)
+  expectedContains   String?
+  actual             String         @default("{}") // JSON
+  status             EvalCaseStatus @default(SKIPPED)
+  latencyMs          Int?
+  costUsd            Float?
+  createdAt          DateTime       @default(now())
+
+  org Organization   @relation(fields: [orgId], references: [id])
+  run EvaluationRun? @relation(fields: [runId], references: [id])
+
+  @@index([orgId, category])
+}
