@@ -16,9 +16,23 @@ Four importable workflows ship in `n8n/workflows/`:
 
 ### 1. Qualified Lead (`qualified-lead.json`)
 
+Search-first, duplicate-safe flow with retries on every HubSpot call:
+
 ```
-AI qualifies lead → Webhook → HubSpot Create Contact → HubSpot Create Deal → Slack notify
+Webhook → Search Contact (by email)
+        → Contact Found?
+            ├─ yes → Update Contact
+            └─ no  → Create Contact
+        → Capture Contact → Create Deal → Associate Contact with Deal → Slack notify
 ```
+
+- **No hardcoded deal stage.** The deal's `pipeline`/`dealstage` come from n8n
+  environment variables `HUBSPOT_DEAL_PIPELINE_ID` / `HUBSPOT_DEAL_STAGE_ID` —
+  set them to values valid in *your* portal, or clear the fields to use the
+  portal default.
+- **Duplicate prevention** via the search-before-create branch.
+- **Associations** use the HubSpot v4 default association endpoint.
+- Every HTTP node has `retryOnFail` (3 tries, 2s apart).
 
 ### 2. Support Escalation (`support-escalation.json`)
 
@@ -42,10 +56,25 @@ Webhook → Wait (follow-up delay) → Check CRM state → Slack notify → upda
 
 1. Install/launch n8n (`npx n8n` or Docker).
 2. In n8n, **Workflows → Import from File**, select a JSON from `n8n/workflows/`.
-3. Configure credentials (HubSpot, Slack, Google) in each node.
-4. For outbound: copy the production webhook URL of the "Qualified Lead" /
-   "Support Escalation" workflows into `N8N_WEBHOOK_URL`.
-5. For inbound: set `APP_URL` (used by the workflows) to your deployed app URL.
+3. Create credentials and attach them to nodes:
+   - **Header Auth** (`httpHeaderAuth`) named e.g. `HubSpot Bearer` with
+     `Name: Authorization`, `Value: Bearer <HUBSPOT_ACCESS_TOKEN>` — used by the
+     HTTP Request nodes.
+   - **Slack** (`slackApi`) for notifications.
+   - **Google Drive OAuth2** for the knowledge-base workflow.
+4. Set n8n **environment variables** used by the workflows:
+   | Variable | Used by |
+   | --- | --- |
+   | `HUBSPOT_DEAL_PIPELINE_ID` | qualified-lead (deal pipeline) |
+   | `HUBSPOT_DEAL_STAGE_ID` | qualified-lead (deal stage) |
+   | `SLACK_CHANNEL_ID` | qualified-lead / support-escalation |
+   | `APP_URL` | knowledge-base-update / support-escalation (callbacks) |
+5. For outbound: activate the workflow and copy its **Production URL** into the
+   app's `N8N_WEBHOOK_URL`.
+6. For inbound: set `APP_URL` to your deployed app URL.
+
+The app posts `{ "type": "<workflow-type>", "payload": { ... } }` to
+`N8N_WEBHOOK_URL`. See `lib/automation/n8n.ts` for the exact payload shape.
 
 ## The job queue
 

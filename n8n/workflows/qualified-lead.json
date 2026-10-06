@@ -5,7 +5,8 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "qualified-lead",
-        "responseMode": "onReceived"
+        "responseMode": "onReceived",
+        "options": {}
       },
       "id": "a1-webhook",
       "name": "Qualified Lead Webhook",
@@ -16,27 +17,102 @@
     {
       "parameters": {
         "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"filterGroups\": [\n    { \"filters\": [ { \"propertyName\": \"email\", \"operator\": \"EQ\", \"value\": \"{{ $json.body.payload.email }}\" } ] }\n  ],\n  \"properties\": [\"email\", \"firstname\", \"lastname\", \"company\"],\n  \"limit\": 1\n}",
+        "options": {}
+      },
+      "id": "a2-search",
+      "name": "Search Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "cond-found",
+              "leftValue": "={{ $json.results.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a3-if",
+      "name": "Contact Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.hubapi.com/crm/v3/objects/contacts/{{ $json.results[0].id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"firstname\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.firstName }}\",\n    \"lastname\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.lastName }}\",\n    \"company\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.company }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "a4-update",
+      "name": "Update Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, -120],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
         "url": "https://api.hubapi.com/crm/v3/objects/contacts",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$credentials.hubspotApi.accessToken}}"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"properties\": {\n    \"email\": \"{{ $json.payload.email }}\",\n    \"firstname\": \"{{ $json.payload.firstName }}\",\n    \"company\": \"{{ $json.payload.company }}\"\n  }\n}"
+        "jsonBody": "={\n  \"properties\": {\n    \"email\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.email }}\",\n    \"firstname\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.firstName }}\",\n    \"lastname\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.lastName }}\",\n    \"company\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.company }}\"\n  }\n}",
+        "options": {}
       },
-      "id": "a2-contact",
-      "name": "HubSpot Create Contact",
+      "id": "a5-create",
+      "name": "Create Contact",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [240, 0]
+      "position": [680, 120],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "cid", "name": "contactId", "value": "={{ $json.id }}", "type": "string" },
+            { "id": "email", "name": "email", "value": "={{ $('Qualified Lead Webhook').item.json.body.payload.email }}", "type": "string" },
+            { "id": "company", "name": "company", "value": "={{ $('Qualified Lead Webhook').item.json.body.payload.company }}", "type": "string" },
+            { "id": "budget", "name": "budget", "value": "={{ $('Qualified Lead Webhook').item.json.body.payload.budget }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a6-set",
+      "name": "Capture Contact",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [900, 0]
     },
     {
       "parameters": {
@@ -44,46 +120,78 @@
         "url": "https://api.hubapi.com/crm/v3/objects/deals",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$credentials.hubspotApi.accessToken}}"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"properties\": {\n    \"dealname\": \"{{ $json.payload.company }} — AI customer support\",\n    \"amount\": \"{{ $json.payload.budget }}\",\n    \"dealstage\": \"qualified\"\n  }\n}"
+        "jsonBody": "={\n  \"properties\": {\n    \"dealname\": \"{{ $json.company }} — AI customer support\",\n    \"amount\": \"{{ $json.budget }}\",\n    \"pipeline\": \"{{ $env.HUBSPOT_DEAL_PIPELINE_ID }}\",\n    \"dealstage\": \"{{ $env.HUBSPOT_DEAL_STAGE_ID }}\"\n  }\n}",
+        "options": {}
       },
-      "id": "a3-deal",
-      "name": "HubSpot Create Deal",
+      "id": "a7-deal",
+      "name": "Create Deal",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 0]
+      "position": [1120, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
-        "channelId": "={{$json.slackChannelId}}",
-        "text": "=New qualified lead: {{ $json.payload.company }} (score {{ $json.payload.score }}) — {{ $json.payload.email }}",
-        "credential": "slackApi"
+        "method": "PUT",
+        "url": "=https://api.hubapi.com/crm/v4/objects/deals/{{ $json.id }}/associations/default/contacts/{{ $('Capture Contact').item.json.contactId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
       },
-      "id": "a4-slack",
+      "id": "a8-assoc",
+      "name": "Associate Contact with Deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "channelId": "={{ $env.SLACK_CHANNEL_ID }}",
+        "text": "=New qualified lead: {{ $('Capture Contact').item.json.company }} — {{ $('Capture Contact').item.json.email }}",
+        "credential": "slackApi",
+        "otherOptions": {}
+      },
+      "id": "a9-slack",
       "name": "Notify Sales Team (Slack)",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.1,
-      "position": [720, 0]
+      "position": [1560, 0],
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
     "Qualified Lead Webhook": {
-      "main": [[{ "node": "HubSpot Create Contact", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Search Contact", "type": "main", "index": 0 }]]
     },
-    "HubSpot Create Contact": {
-      "main": [[{ "node": "HubSpot Create Deal", "type": "main", "index": 0 }]]
+    "Search Contact": {
+      "main": [[{ "node": "Contact Found?", "type": "main", "index": 0 }]]
     },
-    "HubSpot Create Deal": {
+    "Contact Found?": {
+      "main": [
+        [{ "node": "Update Contact", "type": "main", "index": 0 }],
+        [{ "node": "Create Contact", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Contact": {
+      "main": [[{ "node": "Capture Contact", "type": "main", "index": 0 }]]
+    },
+    "Create Contact": {
+      "main": [[{ "node": "Capture Contact", "type": "main", "index": 0 }]]
+    },
+    "Capture Contact": {
+      "main": [[{ "node": "Create Deal", "type": "main", "index": 0 }]]
+    },
+    "Create Deal": {
+      "main": [[{ "node": "Associate Contact with Deal", "type": "main", "index": 0 }]]
+    },
+    "Associate Contact with Deal": {
       "main": [[{ "node": "Notify Sales Team (Slack)", "type": "main", "index": 0 }]]
     }
   },
