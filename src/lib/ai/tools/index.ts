@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { retrieveChunks } from "@/lib/rag/vectorstore";
-import { getCRMProvider } from "@/lib/crm";
 import { parseSettings } from "@/lib/settings";
+import { enqueueJob } from "@/lib/automation/jobs";
 import type { ToolDefinition, ToolResult } from "../types";
 import type { LeadStatus } from "@prisma/client";
 
@@ -198,60 +198,8 @@ export const tools: ToolDefinition[] = [
         breakdown: leadScoreBreakdown(a),
       });
     },
-  },
-  {
-    name: "create_crm_contact",
-    description:
-      "Create or update a CRM contact (e.g. HubSpot) with the customer's details.",
-    schema: z.object({
-      email: z.string().email(),
-      firstName: z.string().trim().max(80).optional(),
-      lastName: z.string().trim().max(80).optional(),
-      phone: z.string().trim().max(40).optional(),
-      company: z.string().trim().max(120).optional(),
-    }),
-    execute: async (args, ctx) => {
-      const a = args as {
-        email: string;
-        firstName?: string;
-        lastName?: string;
-        phone?: string;
-        company?: string;
-      };
-      const crm = getCRMProvider();
-      const res = await crm.upsertContact(ctx.orgId, {
-        email: a.email,
-        firstName: a.firstName,
-        lastName: a.lastName,
-        phone: a.phone,
-        company: a.company,
-      });
-      if (!res.ok) return err(res.error ?? "CRM contact upsert failed.");
-      return ok({ contactId: res.id, demo: res.demo });
-    },
-  },
-  {
-    name: "create_crm_deal",
-    description:
-      "Create a CRM deal (e.g. HubSpot deal) for a qualified sales opportunity.",
-    schema: z.object({
-      name: z.string().trim().min(2).max(200),
-      amount: z.number().positive().optional(),
-      stage: z.string().trim().max(60).optional(),
-    }),
-    execute: async (args, ctx) => {
-      const a = args as { name: string; amount?: number; stage?: string };
-      const crm = getCRMProvider();
-      const res = await crm.createDeal(ctx.orgId, {
-        name: a.name,
-        amount: a.amount,
-        stage: a.stage,
-      });
-      if (!res.ok) return err(res.error ?? "CRM deal creation failed.");
-      return ok({ dealId: res.id, demo: res.demo });
-    },
-  },
-  {
+   },
+   {
     name: "book_meeting",
     description:
       "Schedule a meeting with a sales or support team member. Returns a proposed time and confirmation reference.",
@@ -293,6 +241,20 @@ export const tools: ToolDefinition[] = [
       await prisma.conversation.update({
         where: { id: ctx.conversationId },
         data: { status: "NEEDS_HUMAN_REVIEW", escalationReason: a.reason },
+      });
+      // Emit the automation event; n8n owns the ticket + notification side effects.
+      await enqueueJob({
+        orgId: ctx.orgId,
+        type: "SUPPORT_ESCALATION",
+        idempotencyKey: `escalation:${escalation.id}`,
+        payload: {
+          conversationId: ctx.conversationId,
+          escalationId: escalation.id,
+          reason: a.reason,
+          summary: a.summary,
+          customerEmail: ctx.customer.email ?? undefined,
+          priority: "HIGH",
+        },
       });
       return ok({ escalationId: escalation.id });
     },

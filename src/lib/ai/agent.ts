@@ -177,33 +177,27 @@ async function runLeadFlow(
   const qualified = score.status === "QUALIFIED";
 
   if (qualified && lead?.email) {
-    const [firstName = "", lastName = ""] = (lead.name ?? "").split(" ");
-    const contact = getTool("create_crm_contact")!;
-    const c = await runTool(contact, {
-      email: lead.email,
-      firstName,
-      lastName,
-      company: lead.company,
-    }, ctx);
-    toolCalls.push({ name: "create_crm_contact", status: c.status });
-
-    const deal = getTool("create_crm_deal")!;
-    const d = await runTool(deal, {
-      name: `${lead.company ?? "New customer"} — AI customer support`,
-      // No hardcoded stage — the CRM provider applies the configured pipeline/stage.
-    }, ctx);
-    toolCalls.push({ name: "create_crm_deal", status: d.status });
-
+    // Single ownership of CRM side effects: the agent persists business state
+    // and emits ONE event; the n8n automation owns the HubSpot write
+    // (upsert contact → deal → association). The agent never writes HubSpot
+    // directly, so a record can never be created twice.
+    const [firstName = "", lastName = ""] = (lead.name ?? "").trim().split(/\s+/);
     await enqueueJob({
       orgId: input.orgId,
       type: "LEAD_QUALIFICATION",
       idempotencyKey: `lead:${input.conversationId}:qualified`,
       payload: {
-        conversationId: input.conversationId,
         leadId: lead.id,
+        conversationId: input.conversationId,
+        firstName,
+        lastName: lastName || undefined,
         email: lead.email,
-        company: lead.company,
-        score: score.score,
+        company: lead.company ?? undefined,
+        companySize: lead.companySize ?? undefined,
+        budget: lead.budgetRange ?? undefined,
+        timeline: lead.timeline ?? undefined,
+        problem: lead.problem ?? undefined,
+        score: score.score ?? 0,
       },
     });
 
@@ -422,9 +416,17 @@ async function createEscalation(
   reason: string,
   summary: string,
 ) {
-  return prisma.escalation.create({
+  const escalation = await prisma.escalation.create({
     data: { orgId, conversationId, reason, aiSummary: summary, status: "OPEN" },
   });
+  // Emit the automation event; n8n owns ticket + notification side effects.
+  await enqueueJob({
+    orgId,
+    type: "SUPPORT_ESCALATION",
+    idempotencyKey: `escalation:${escalation.id}`,
+    payload: { conversationId, escalationId: escalation.id, reason, summary, priority: "HIGH" },
+  });
+  return escalation;
 }
 
 /**
