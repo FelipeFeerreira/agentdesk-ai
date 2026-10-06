@@ -219,14 +219,14 @@ export const tools: ToolDefinition[] = [
         company?: string;
       };
       const crm = getCRMProvider();
-      const res = await crm.createContact(ctx.orgId, {
+      const res = await crm.upsertContact(ctx.orgId, {
         email: a.email,
         firstName: a.firstName,
         lastName: a.lastName,
         phone: a.phone,
         company: a.company,
       });
-      if (!res.ok) return err(res.error ?? "CRM contact creation failed.");
+      if (!res.ok) return err(res.error ?? "CRM contact upsert failed.");
       return ok({ contactId: res.id, demo: res.demo });
     },
   },

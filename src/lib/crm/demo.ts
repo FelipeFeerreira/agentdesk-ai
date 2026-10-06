@@ -71,6 +71,11 @@ export class DemoCRMProvider implements CRMProvider {
     return { ok: true, demo: true, found: !!found, id: found?.id };
   }
 
+  async upsertContact(orgId: string, input: CRMContactInput): Promise<CRMResult> {
+    // Same search-first behaviour as the live provider, recorded locally.
+    return this.createContact(orgId, input);
+  }
+
   async createDeal(_orgId: string, _input: CRMDealInput): Promise<CRMResult> {
     return { ok: true, id: demoId("deal"), demo: true };
   }

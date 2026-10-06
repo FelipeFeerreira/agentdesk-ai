@@ -190,7 +190,7 @@ async function runLeadFlow(
     const deal = getTool("create_crm_deal")!;
     const d = await runTool(deal, {
       name: `${lead.company ?? "New customer"} — AI customer support`,
-      stage: "qualified",
+      // No hardcoded stage — the CRM provider applies the configured pipeline/stage.
     }, ctx);
     toolCalls.push({ name: "create_crm_deal", status: d.status });
 

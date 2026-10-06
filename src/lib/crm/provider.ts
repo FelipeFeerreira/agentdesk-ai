@@ -34,6 +34,8 @@ export interface CRMProvider {
   createContact(orgId: string, input: CRMContactInput): Promise<CRMResult>;
   updateContact(orgId: string, contactId: string, input: Partial<CRMContactInput>): Promise<CRMResult>;
   searchContact(orgId: string, email: string): Promise<CRMResult & { found?: boolean }>;
+  /** Search by email first, then update the existing contact or create a new one. */
+  upsertContact(orgId: string, input: CRMContactInput): Promise<CRMResult>;
   createDeal(orgId: string, input: CRMDealInput): Promise<CRMResult>;
   updateDeal(orgId: string, dealId: string, input: Partial<CRMDealInput>): Promise<CRMResult>;
   associateContactWithDeal(orgId: string, contactId: string, dealId: string): Promise<CRMResult>;

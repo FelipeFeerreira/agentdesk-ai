@@ -7,16 +7,42 @@ setting environment variables.
 ## HubSpot CRM
 
 `lib/crm/provider.ts` defines `CRMProvider`; `lib/crm/hubspot.ts` is the real
-implementation (v3 REST API), `lib/crm/demo.ts` is the labelled demo.
+implementation, `lib/crm/demo.ts` is the labelled demo.
 
-Supported operations: create/update/search contact, create/update deal,
-associate contact with deal.
+Supported operations: create/update/search contact, **upsert** contact,
+create/update deal, associate contact with deal.
 
 **Enable:** set `HUBSPOT_ACCESS_TOKEN` (a HubSpot private app token with
 `crm.objects.contacts` and `crm.objects.deals` scopes).
 
-HubSpot-specific behaviour that the job runner relies on: `429` responses throw
-`HubSpotRateLimitError`, which the retry/backoff policy handles.
+### Duplicate prevention
+
+`CRMProvider.upsertContact()` searches by email first, then updates the existing
+contact or creates a new one. The agent's `create_crm_contact` tool uses this, so
+repeated syncs never create duplicate contacts.
+
+### Retry & resilience
+
+Every HubSpot call retries with exponential backoff on `429`, `5xx` and network
+errors, honouring the `Retry-After` header. Non-retryable `4xx` (400/401/403/404)
+fail fast without retrying. Exhausted `429`s raise `HubSpotRateLimitError`.
+Tune with `HUBSPOT_MAX_ATTEMPTS` (default 4) and `HUBSPOT_RETRY_BASE_MS`
+(default 500 ms).
+
+### Pipeline / stage configuration
+
+Deal stages are portal-specific, so **no stage is hardcoded**. Set
+`HUBSPOT_DEAL_PIPELINE_ID` and `HUBSPOT_DEAL_STAGE_ID` to route deals into an
+explicit pipeline/stage; if left blank, HubSpot applies the portal default.
+
+### Associations
+
+`associateContactWithDeal()` uses the HubSpot **v4 default association**
+endpoint (`PUT /crm/v4/objects/deals/{id}/associations/default/contacts/{id}`),
+avoiding hardcoded numeric association type ids.
+
+No live HubSpot token is required for the app to run — without it, the labelled
+`DemoCRMProvider` is used.
 
 ## WhatsApp Cloud API
 
