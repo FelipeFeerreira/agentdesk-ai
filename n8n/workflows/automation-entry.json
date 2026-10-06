@@ -1,0 +1,154 @@
+{
+  "name": "AgentDesk — Automation Entry",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agentdesk-automation",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "e1-webhook",
+      "name": "AgentDesk Automation Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "notes": "Authenticate with a Header Auth credential (header x-agentdesk-secret = N8N_WEBHOOK_SECRET)."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Validate the AgentDesk automation envelope.\nconst required = ['eventId', 'type', 'version', 'organizationId', 'timestamp', 'payload'];\nconst known = ['LEAD_QUALIFIED', 'SUPPORT_ESCALATED', 'LEAD_FOLLOW_UP', 'KNOWLEDGE_UPDATE'];\nconst out = [];\nfor (const item of $input.all()) {\n  const e = item.json;\n  for (const key of required) {\n    if (e[key] === undefined || e[key] === null) {\n      throw new Error(`AgentDesk event missing required field: ${key}`);\n    }\n  }\n  if (!known.includes(e.type)) {\n    throw new Error(`Unknown AgentDesk event type: ${e.type}`);\n  }\n  out.push({ json: e });\n}\nreturn out;"
+      },
+      "id": "e2-validate",
+      "name": "Validate Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  { "id": "r1", "leftValue": "={{ $json.type }}", "rightValue": "LEAD_QUALIFIED", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "LEAD_QUALIFIED"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  { "id": "r2", "leftValue": "={{ $json.type }}", "rightValue": "SUPPORT_ESCALATED", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SUPPORT_ESCALATED"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  { "id": "r3", "leftValue": "={{ $json.type }}", "rightValue": "LEAD_FOLLOW_UP", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "LEAD_FOLLOW_UP"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+                "conditions": [
+                  { "id": "r4", "leftValue": "={{ $json.type }}", "rightValue": "KNOWLEDGE_UPDATE", "operator": { "type": "string", "operation": "equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "KNOWLEDGE_UPDATE"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "e3-switch",
+      "name": "Route by Event Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "workflowId": { "__rl": true, "value": "", "mode": "list", "cachedResultName": "AgentDesk — Qualified Lead" },
+        "workflowInputs": { "mappingMode": "passThrough", "value": {} },
+        "options": { "waitForSubWorkflow": false }
+      },
+      "id": "e4-lead",
+      "name": "→ Qualified Lead",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [680, -180]
+    },
+    {
+      "parameters": {
+        "workflowId": { "__rl": true, "value": "", "mode": "list", "cachedResultName": "AgentDesk — Support Escalation" },
+        "workflowInputs": { "mappingMode": "passThrough", "value": {} },
+        "options": { "waitForSubWorkflow": false }
+      },
+      "id": "e5-escalation",
+      "name": "→ Support Escalation",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [680, -60]
+    },
+    {
+      "parameters": {
+        "workflowId": { "__rl": true, "value": "", "mode": "list", "cachedResultName": "AgentDesk — Lead Follow-up" },
+        "workflowInputs": { "mappingMode": "passThrough", "value": {} },
+        "options": { "waitForSubWorkflow": false }
+      },
+      "id": "e6-followup",
+      "name": "→ Lead Follow-up",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [680, 60]
+    },
+    {
+      "parameters": {
+        "workflowId": { "__rl": true, "value": "", "mode": "list", "cachedResultName": "AgentDesk — Knowledge Base Update" },
+        "workflowInputs": { "mappingMode": "passThrough", "value": {} },
+        "options": { "waitForSubWorkflow": false }
+      },
+      "id": "e7-kb",
+      "name": "→ Knowledge Base Update",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [680, 180]
+    }
+  ],
+  "connections": {
+    "AgentDesk Automation Webhook": {
+      "main": [[{ "node": "Validate Event", "type": "main", "index": 0 }]]
+    },
+    "Validate Event": {
+      "main": [[{ "node": "Route by Event Type", "type": "main", "index": 0 }]]
+    },
+    "Route by Event Type": {
+      "main": [
+        [{ "node": "→ Qualified Lead", "type": "main", "index": 0 }],
+        [{ "node": "→ Support Escalation", "type": "main", "index": 0 }],
+        [{ "node": "→ Lead Follow-up", "type": "main", "index": 0 }],
+        [{ "node": "→ Knowledge Base Update", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

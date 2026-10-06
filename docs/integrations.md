@@ -9,6 +9,13 @@ setting environment variables.
 `lib/crm/provider.ts` defines `CRMProvider`; `lib/crm/hubspot.ts` is the real
 implementation, `lib/crm/demo.ts` is the labelled demo.
 
+> **Single ownership.** For qualified leads, HubSpot writes are owned by the
+> **n8n automation**, not the AI agent. The agent persists the `Lead` and emits a
+> `LEAD_QUALIFIED` event; the n8n workflow performs the contact upsert, deal
+> creation and association. The agent never writes HubSpot directly, so records
+> can never be created twice. `HubSpotProvider` is the reference adapter used by
+> the provider tests and available for app-side operations.
+
 Supported operations: create/update/search contact, **upsert** contact,
 create/update deal, associate contact with deal.
 

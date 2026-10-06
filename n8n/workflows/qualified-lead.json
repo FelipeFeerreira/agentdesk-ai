@@ -2,16 +2,11 @@
   "name": "AgentDesk — Qualified Lead",
   "nodes": [
     {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "qualified-lead",
-        "responseMode": "onReceived",
-        "options": {}
-      },
-      "id": "a1-webhook",
-      "name": "Qualified Lead Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
+      "parameters": {},
+      "id": "a0-trigger",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
       "position": [0, 0]
     },
     {
@@ -22,7 +17,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"filterGroups\": [\n    { \"filters\": [ { \"propertyName\": \"email\", \"operator\": \"EQ\", \"value\": \"{{ $json.body.payload.email }}\" } ] }\n  ],\n  \"properties\": [\"email\", \"firstname\", \"lastname\", \"company\"],\n  \"limit\": 1\n}",
+        "jsonBody": "={\n  \"filterGroups\": [\n    { \"filters\": [ { \"propertyName\": \"email\", \"operator\": \"EQ\", \"value\": \"{{ $json.payload.email }}\" } ] }\n  ],\n  \"properties\": [\"email\", \"firstname\", \"lastname\", \"company\"],\n  \"limit\": 1\n}",
         "options": {}
       },
       "id": "a2-search",
@@ -39,12 +34,7 @@
         "conditions": {
           "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
           "conditions": [
-            {
-              "id": "cond-found",
-              "leftValue": "={{ $json.results.length }}",
-              "rightValue": 0,
-              "operator": { "type": "number", "operation": "gt" }
-            }
+            { "id": "cond-found", "leftValue": "={{ $json.results.length }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" } }
           ],
           "combinator": "and"
         },
@@ -64,7 +54,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"properties\": {\n    \"firstname\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.firstName }}\",\n    \"lastname\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.lastName }}\",\n    \"company\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.company }}\"\n  }\n}",
+        "jsonBody": "={\n  \"properties\": {\n    \"firstname\": \"{{ $('When Executed by Another Workflow').item.json.payload.firstName }}\",\n    \"lastname\": \"{{ $('When Executed by Another Workflow').item.json.payload.lastName }}\",\n    \"company\": \"{{ $('When Executed by Another Workflow').item.json.payload.company }}\"\n  }\n}",
         "options": {}
       },
       "id": "a4-update",
@@ -84,7 +74,7 @@
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"properties\": {\n    \"email\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.email }}\",\n    \"firstname\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.firstName }}\",\n    \"lastname\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.lastName }}\",\n    \"company\": \"{{ $('Qualified Lead Webhook').item.json.body.payload.company }}\"\n  }\n}",
+        "jsonBody": "={\n  \"properties\": {\n    \"email\": \"{{ $('When Executed by Another Workflow').item.json.payload.email }}\",\n    \"firstname\": \"{{ $('When Executed by Another Workflow').item.json.payload.firstName }}\",\n    \"lastname\": \"{{ $('When Executed by Another Workflow').item.json.payload.lastName }}\",\n    \"company\": \"{{ $('When Executed by Another Workflow').item.json.payload.company }}\"\n  }\n}",
         "options": {}
       },
       "id": "a5-create",
@@ -101,9 +91,9 @@
         "assignments": {
           "assignments": [
             { "id": "cid", "name": "contactId", "value": "={{ $json.id }}", "type": "string" },
-            { "id": "email", "name": "email", "value": "={{ $('Qualified Lead Webhook').item.json.body.payload.email }}", "type": "string" },
-            { "id": "company", "name": "company", "value": "={{ $('Qualified Lead Webhook').item.json.body.payload.company }}", "type": "string" },
-            { "id": "budget", "name": "budget", "value": "={{ $('Qualified Lead Webhook').item.json.body.payload.budget }}", "type": "string" }
+            { "id": "email", "name": "email", "value": "={{ $('When Executed by Another Workflow').item.json.payload.email }}", "type": "string" },
+            { "id": "company", "name": "company", "value": "={{ $('When Executed by Another Workflow').item.json.payload.company }}", "type": "string" },
+            { "id": "budget", "name": "budget", "value": "={{ $('When Executed by Another Workflow').item.json.payload.budget }}", "type": "string" }
           ]
         },
         "options": {}
@@ -167,7 +157,7 @@
     }
   ],
   "connections": {
-    "Qualified Lead Webhook": {
+    "When Executed by Another Workflow": {
       "main": [[{ "node": "Search Contact", "type": "main", "index": 0 }]]
     },
     "Search Contact": {

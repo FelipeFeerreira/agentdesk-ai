@@ -2,53 +2,55 @@
   "name": "AgentDesk — Knowledge Base Update",
   "nodes": [
     {
-      "parameters": {
-        "triggerOn": "webhook",
-        "webhook": {
-          "event": "fileCreated",
-          "options": {}
-        }
-      },
-      "id": "c1-drive",
-      "name": "Google Drive Trigger (file created)",
-      "type": "n8n-nodes-base.googleDriveTrigger",
-      "typeVersion": 1,
-      "position": [0, 0],
-      "credentials": { "googleApi": { "id": "1", "name": "Google Drive OAuth2" } }
+      "parameters": {},
+      "id": "c0-trigger",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0]
     },
     {
       "parameters": {
-        "fileId": "={{ $json.id }}",
-        "options": {}
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Normalize the knowledge payload into a fresh ingestion event.\nconst e = $json;\nreturn {\n  json: {\n    eventId: `evt_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,\n    type: 'KNOWLEDGE_UPDATE',\n    version: 1,\n    organizationId: e.organizationId,\n    timestamp: new Date().toISOString(),\n    payload: {\n      title: e.payload.title,\n      content: e.payload.content ?? e.payload.text ?? '',\n      source: e.payload.source ?? 'n8n',\n      contentHash: e.payload.contentHash\n    }\n  }\n};"
       },
-      "id": "c2-download",
-      "name": "Google Drive Download",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [240, 0],
-      "credentials": { "googleApi": { "id": "1", "name": "Google Drive OAuth2" } }
+      "id": "c1-build",
+      "name": "Build Ingestion Event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.APP_URL}}/api/webhooks/n8n",
+        "url": "={{ $env.APP_URL }}/api/webhooks/n8n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-agentdesk-secret", "value": "={{ $env.N8N_WEBHOOK_SECRET }}" }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"type\": \"kb_ingestion\",\n  \"payload\": {\n    \"title\": \"{{ $json.name }}\",\n    \"content\": \"{{ $json.data }}\"\n  }\n}"
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
       },
-      "id": "c3-ingest",
-      "name": "Send to AgentDesk Ingestion Endpoint",
+      "id": "c2-ingest",
+      "name": "Send to AgentDesk Ingestion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 0]
+      "position": [440, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     }
   ],
   "connections": {
-    "Google Drive Trigger (file created)": {
-      "main": [[{ "node": "Google Drive Download", "type": "main", "index": 0 }]]
+    "When Executed by Another Workflow": {
+      "main": [[{ "node": "Build Ingestion Event", "type": "main", "index": 0 }]]
     },
-    "Google Drive Download": {
-      "main": [[{ "node": "Send to AgentDesk Ingestion Endpoint", "type": "main", "index": 0 }]]
+    "Build Ingestion Event": {
+      "main": [[{ "node": "Send to AgentDesk Ingestion", "type": "main", "index": 0 }]]
     }
   },
   "settings": { "executionOrder": "v1" }

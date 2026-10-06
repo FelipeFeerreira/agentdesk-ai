@@ -1,85 +1,105 @@
 # n8n automation
 
-AgentDesk AI integrates with n8n in **both directions**:
+AgentDesk AI integrates with n8n in **both directions**, through a single
+versioned contract.
 
-- **Outbound** — the app dispatches events to n8n via `triggerN8n()`
-  (`lib/automation/n8n.ts`) using `N8N_WEBHOOK_URL`.
-- **Inbound** — n8n calls the app's webhook (`/api/webhooks/n8n`) for flows like
-  document ingestion.
+## Architecture
 
-When `N8N_WEBHOOK_URL` is unset (demo mode), events are recorded locally and
-clearly labelled as simulated.
+```
+AgentDesk (AI agent persists business state)
+   │  emits ONE versioned event
+   ▼
+POST N8N_WEBHOOK_URL  (HMAC + shared-secret header)
+   │
+   ▼
+n8n entry workflow  →  Validate Event  →  Switch(event.type)
+   ├── LEAD_QUALIFIED     → sub-workflow: HubSpot upsert → deal → association → Slack
+   ├── SUPPORT_ESCALATED  → sub-workflow: Slack notify
+   ├── LEAD_FOLLOW_UP     → sub-workflow: wait → Slack notify
+   └── KNOWLEDGE_UPDATE   → sub-workflow: POST /api/webhooks/n8n (ingestion)
+```
+
+- **One entry endpoint.** `N8N_WEBHOOK_URL` is the single automation endpoint.
+- **One owner per side effect.** HubSpot writes for qualified leads are owned by
+  the n8n workflow — the AI agent never writes HubSpot directly, so a record can
+  never be created twice.
+
+## Event contract
+
+Every event is a versioned envelope (see `src/lib/automation/events.ts`, validated
+with Zod on both sides):
+
+```json
+{
+  "eventId": "evt_...",
+  "type": "LEAD_QUALIFIED",
+  "version": 1,
+  "organizationId": "...",
+  "timestamp": "2026-01-01T00:00:00.000Z",
+  "payload": { "...": "type-specific" }
+}
+```
+
+Payload shapes:
+
+| type | payload |
+| --- | --- |
+| `LEAD_QUALIFIED` | `leadId, conversationId, firstName?, lastName?, email, phone?, company?, companySize?, budget?, timeline?, problem?, score` |
+| `SUPPORT_ESCALATED` | `conversationId, escalationId?, reason, summary, customerEmail?, priority` |
+| `LEAD_FOLLOW_UP` | `leadId, email, company?, followUpDelayHours` |
+| `KNOWLEDGE_UPDATE` | `title, content, source, documentId?, contentHash?` |
+
+Outbound requests carry: `x-agentdesk-signature` (HMAC-SHA256 of the body),
+`x-agentdesk-secret` (shared secret), `x-agentdesk-event`, `x-agentdesk-version`.
+The inbound webhook (`/api/webhooks/n8n`) verifies the HMAC when
+`N8N_WEBHOOK_SECRET` is set.
 
 ## Workflows
 
-Four importable workflows ship in `n8n/workflows/`:
+`n8n/workflows/`:
 
-### 1. Qualified Lead (`qualified-lead.json`)
+| File | Role |
+| --- | --- |
+| `automation-entry.json` | Single webhook → Validate → Switch → Execute Sub-workflow |
+| `qualified-lead.json` | Sub-workflow: search/upsert HubSpot contact → deal → association → Slack |
+| `support-escalation.json` | Sub-workflow: notify support |
+| `lead-follow-up.json` | Sub-workflow: wait → notify |
+| `knowledge-base-update.json` | Sub-workflow: send document to the ingestion endpoint |
 
-Search-first, duplicate-safe flow with retries on every HubSpot call:
-
-```
-Webhook → Search Contact (by email)
-        → Contact Found?
-            ├─ yes → Update Contact
-            └─ no  → Create Contact
-        → Capture Contact → Create Deal → Associate Contact with Deal → Slack notify
-```
-
-- **No hardcoded deal stage.** The deal's `pipeline`/`dealstage` come from n8n
-  environment variables `HUBSPOT_DEAL_PIPELINE_ID` / `HUBSPOT_DEAL_STAGE_ID` —
-  set them to values valid in *your* portal, or clear the fields to use the
-  portal default.
-- **Duplicate prevention** via the search-before-create branch.
-- **Associations** use the HubSpot v4 default association endpoint.
-- Every HTTP node has `retryOnFail` (3 tries, 2s apart).
-
-### 2. Support Escalation (`support-escalation.json`)
-
-```
-AI escalates → Webhook → Create ticket → Slack notify → track escalation
-```
-
-### 3. Knowledge Base Update (`knowledge-base-update.json`)
-
-```
-Google Drive file created → Download → extract → POST /api/webhooks/n8n (kb_ingestion) → embeddings
-```
-
-### 4. Lead Follow-up (`lead-follow-up.json`)
-
-```
-Webhook → Wait (follow-up delay) → Check CRM state → Slack notify → update status
-```
+Sub-workflows start with a **When Executed by Another Workflow** trigger and
+consume `$json.payload`.
 
 ## Importing into n8n
 
 1. Install/launch n8n (`npx n8n` or Docker).
-2. In n8n, **Workflows → Import from File**, select a JSON from `n8n/workflows/`.
-3. Create credentials and attach them to nodes:
-   - **Header Auth** (`httpHeaderAuth`) named e.g. `HubSpot Bearer` with
-     `Name: Authorization`, `Value: Bearer <HUBSPOT_ACCESS_TOKEN>` — used by the
-     HTTP Request nodes.
-   - **Slack** (`slackApi`) for notifications.
-   - **Google Drive OAuth2** for the knowledge-base workflow.
-4. Set n8n **environment variables** used by the workflows:
+2. **Import** all five JSON files from `n8n/workflows/`.
+3. Create credentials:
+   - **Header Auth** (`httpHeaderAuth`) named e.g. `AgentDesk Secret` with
+     `Name: x-agentdesk-secret`, `Value: <N8N_WEBHOOK_SECRET>` — set it on the
+     entry webhook node **and** use it (or a HubSpot Bearer header credential)
+     for the HubSpot HTTP nodes.
+   - **Slack** (`slackApi`).
+4. In `automation-entry.json`, open each **→ …** node and select the matching
+   sub-workflow (import assigns new IDs, so re-link them once).
+5. Set n8n environment variables:
    | Variable | Used by |
    | --- | --- |
-   | `HUBSPOT_DEAL_PIPELINE_ID` | qualified-lead (deal pipeline) |
-   | `HUBSPOT_DEAL_STAGE_ID` | qualified-lead (deal stage) |
-   | `SLACK_CHANNEL_ID` | qualified-lead / support-escalation |
-   | `APP_URL` | knowledge-base-update / support-escalation (callbacks) |
-5. For outbound: activate the workflow and copy its **Production URL** into the
-   app's `N8N_WEBHOOK_URL`.
-6. For inbound: set `APP_URL` to your deployed app URL.
+   | `HUBSPOT_DEAL_PIPELINE_ID` | qualified-lead |
+   | `HUBSPOT_DEAL_STAGE_ID` | qualified-lead |
+   | `SLACK_CHANNEL_ID` | qualified-lead / support-escalation / lead-follow-up |
+   | `APP_URL` | knowledge-base-update |
+   | `N8N_WEBHOOK_SECRET` | knowledge-base-update (callback header) |
+6. Activate the entry workflow and copy its **Production URL** into the app's
+   `N8N_WEBHOOK_URL`.
 
-The app posts `{ "type": "<workflow-type>", "payload": { ... } }` to
-`N8N_WEBHOOK_URL`. See `lib/automation/n8n.ts` for the exact payload shape.
+In demo mode (no `N8N_WEBHOOK_URL`), events are recorded locally and labelled as
+simulated.
 
 ## The job queue
 
-`triggerN8n()` is wrapped by a database-backed job runner
-(`lib/automation/jobs.ts`) that provides retries with exponential backoff,
-idempotency via `idempotencyKey`, and a dead-letter state for manual retry.
-In production, drive `processDueJobs()` from a scheduler (e.g. Vercel Cron
-calling `/api/automations/run`).
+Outbound events go through the database-backed job runner
+(`lib/automation/jobs.ts`): retries with exponential backoff, idempotency via
+`idempotencyKey`, dead-letter for exhausted retries, and payload validation
+before dispatch (invalid payloads move the job to `NEEDS_REVIEW`). In production,
+drive `processDueJobs()` from a scheduler (e.g. Vercel Cron calling
+`/api/automations/run`).

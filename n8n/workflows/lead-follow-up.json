@@ -2,15 +2,11 @@
   "name": "AgentDesk — Lead Follow-up",
   "nodes": [
     {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "lead-follow-up",
-        "responseMode": "onReceived"
-      },
-      "id": "d1-webhook",
-      "name": "Lead Follow-up Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
+      "parameters": {},
+      "id": "d0-trigger",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
       "position": [0, 0]
     },
     {
@@ -18,55 +14,35 @@
         "amount": "={{ $json.payload.followUpDelayHours }}",
         "unit": "hours"
       },
-      "id": "d2-wait",
+      "id": "d1-wait",
       "name": "Wait for follow-up delay",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [240, 0]
+      "position": [220, 0],
+      "webhookId": "agentdesk-followup-wait"
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "=https://api.hubapi.com/crm/v3/objects/contacts/search",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{$credentials.hubspotApi.accessToken}}"
-            }
-          ]
-        }
+        "channelId": "={{ $env.SLACK_CHANNEL_ID }}",
+        "text": "=Follow-up due: {{ $json.payload.company || $json.payload.email }} has not responded. Contact {{ $json.payload.email }}.",
+        "credential": "slackApi",
+        "otherOptions": {}
       },
-      "id": "d3-check",
-      "name": "Check CRM State",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [480, 0]
-    },
-    {
-      "parameters": {
-        "channelId": "={{$json.slackChannelId}}",
-        "text": "=Follow-up due: {{ $json.payload.company }} has not responded. Contact {{ $json.payload.email }}.",
-        "credential": "slackApi"
-      },
-      "id": "d4-notify",
+      "id": "d2-slack",
       "name": "Notify Sales Team (Slack)",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2.1,
-      "position": [720, 0]
+      "position": [440, 0],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
-    "Lead Follow-up Webhook": {
+    "When Executed by Another Workflow": {
       "main": [[{ "node": "Wait for follow-up delay", "type": "main", "index": 0 }]]
     },
     "Wait for follow-up delay": {
-      "main": [[{ "node": "Check CRM State", "type": "main", "index": 0 }]]
-    },
-    "Check CRM State": {
       "main": [[{ "node": "Notify Sales Team (Slack)", "type": "main", "index": 0 }]]
     }
   },
