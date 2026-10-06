@@ -1,0 +1,74 @@
+{
+  "name": "AgentDesk — Lead Follow-up",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-follow-up",
+        "responseMode": "onReceived"
+      },
+      "id": "d1-webhook",
+      "name": "Lead Follow-up Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json.payload.followUpDelayHours }}",
+        "unit": "hours"
+      },
+      "id": "d2-wait",
+      "name": "Wait for follow-up delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.hubapi.com/crm/v3/objects/contacts/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.hubspotApi.accessToken}}"
+            }
+          ]
+        }
+      },
+      "id": "d3-check",
+      "name": "Check CRM State",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "channelId": "={{$json.slackChannelId}}",
+        "text": "=Follow-up due: {{ $json.payload.company }} has not responded. Contact {{ $json.payload.email }}.",
+        "credential": "slackApi"
+      },
+      "id": "d4-notify",
+      "name": "Notify Sales Team (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [720, 0]
+    }
+  ],
+  "connections": {
+    "Lead Follow-up Webhook": {
+      "main": [[{ "node": "Wait for follow-up delay", "type": "main", "index": 0 }]]
+    },
+    "Wait for follow-up delay": {
+      "main": [[{ "node": "Check CRM State", "type": "main", "index": 0 }]]
+    },
+    "Check CRM State": {
+      "main": [[{ "node": "Notify Sales Team (Slack)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

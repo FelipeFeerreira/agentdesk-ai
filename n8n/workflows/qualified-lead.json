@@ -1,0 +1,91 @@
+{
+  "name": "AgentDesk — Qualified Lead",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "qualified-lead",
+        "responseMode": "onReceived"
+      },
+      "id": "a1-webhook",
+      "name": "Qualified Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.hubspotApi.accessToken}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"email\": \"{{ $json.payload.email }}\",\n    \"firstname\": \"{{ $json.payload.firstName }}\",\n    \"company\": \"{{ $json.payload.company }}\"\n  }\n}"
+      },
+      "id": "a2-contact",
+      "name": "HubSpot Create Contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubapi.com/crm/v3/objects/deals",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$credentials.hubspotApi.accessToken}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"properties\": {\n    \"dealname\": \"{{ $json.payload.company }} — AI customer support\",\n    \"amount\": \"{{ $json.payload.budget }}\",\n    \"dealstage\": \"qualified\"\n  }\n}"
+      },
+      "id": "a3-deal",
+      "name": "HubSpot Create Deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "channelId": "={{$json.slackChannelId}}",
+        "text": "=New qualified lead: {{ $json.payload.company }} (score {{ $json.payload.score }}) — {{ $json.payload.email }}",
+        "credential": "slackApi"
+      },
+      "id": "a4-slack",
+      "name": "Notify Sales Team (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [720, 0]
+    }
+  ],
+  "connections": {
+    "Qualified Lead Webhook": {
+      "main": [[{ "node": "HubSpot Create Contact", "type": "main", "index": 0 }]]
+    },
+    "HubSpot Create Contact": {
+      "main": [[{ "node": "HubSpot Create Deal", "type": "main", "index": 0 }]]
+    },
+    "HubSpot Create Deal": {
+      "main": [[{ "node": "Notify Sales Team (Slack)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

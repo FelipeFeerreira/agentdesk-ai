@@ -1,0 +1,52 @@
+{
+  "name": "AgentDesk — Support Escalation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support-escalation",
+        "responseMode": "onReceived"
+      },
+      "id": "b1-webhook",
+      "name": "Support Escalation Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.APP_URL}}/api/webhooks/tickets",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"subject\": \"{{ $json.payload.subject }}\",\n  \"description\": \"{{ $json.payload.summary }}\",\n  \"priority\": \"HIGH\"\n}"
+      },
+      "id": "b2-ticket",
+      "name": "Create Support Ticket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "channelId": "={{$json.slackChannelId}}",
+        "text": "=Escalation: {{ $json.payload.reason }} — {{ $json.payload.summary }}",
+        "credential": "slackApi"
+      },
+      "id": "b3-slack",
+      "name": "Notify Support Team (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [480, 0]
+    }
+  ],
+  "connections": {
+    "Support Escalation Webhook": {
+      "main": [[{ "node": "Create Support Ticket", "type": "main", "index": 0 }]]
+    },
+    "Create Support Ticket": {
+      "main": [[{ "node": "Notify Support Team (Slack)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}
