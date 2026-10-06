@@ -29,18 +29,35 @@ export default async function EvalRunDetailPage({
         title={run.name}
         description="Per-scenario results from the evaluation suite."
       />
-      <Link href="/evaluations" className="text-sm text-ink-400 hover:text-ink-700">
-        ← Evaluations
-      </Link>
+      <div className="flex items-center gap-3">
+        <Link href="/evaluations" className="text-sm text-ink-400 hover:text-ink-700">
+          ← Evaluations
+        </Link>
+        <Badge tone={run.provider === "demo" ? "warning" : "success"}>
+          {run.provider === "demo" ? "Demo (deterministic)" : "Live model"}
+        </Badge>
+      </div>
 
       {metrics && (
-        <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-5">
+        <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
           {[
             { label: "Passed", value: `${run.passedCases}/${run.totalCases}` },
             { label: "Intent accuracy", value: `${Math.round(metrics.intentAccuracy * 100)}%` },
             { label: "Tool accuracy", value: `${Math.round(metrics.toolAccuracy * 100)}%` },
             { label: "Escalation accuracy", value: `${Math.round(metrics.escalationAccuracy * 100)}%` },
+            {
+              label: "RAG retrieval",
+              value: metrics.ragSuccessRate != null ? `${Math.round(metrics.ragSuccessRate * 100)}%` : "—",
+            },
+            {
+              label: "Unsupported handling",
+              value: metrics.unsupportedHandlingRate != null ? `${Math.round(metrics.unsupportedHandlingRate * 100)}%` : "—",
+            },
             { label: "Avg latency", value: `${metrics.avgLatencyMs}ms` },
+            {
+              label: "Tokens / est. cost",
+              value: `${metrics.totalTokens} · $${metrics.estimatedCostUsd}`,
+            },
           ].map((c) => (
             <Card key={c.label}>
               <div className="px-4 py-3">

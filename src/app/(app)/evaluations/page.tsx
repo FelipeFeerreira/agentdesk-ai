@@ -37,7 +37,7 @@ export default async function EvaluationsPage() {
         </Card>
       ) : (
         <Card className="overflow-hidden">
-          <Table headers={["Run", "Status", "Passed", "Intent acc.", "Tool acc.", "Escalation acc.", "Avg latency", "Date"]}>
+          <Table headers={["Run", "Provider", "Status", "Passed", "Intent acc.", "Tool acc.", "RAG", "Avg latency", "Date"]}>
             {runs.map((r) => {
               const m = safeParse<EvalRunMetrics>(r.metrics);
               return (
@@ -46,6 +46,11 @@ export default async function EvaluationsPage() {
                     <Link href={`/evaluations/${r.id}`} className="font-medium text-brand-600 hover:underline">
                       {r.name}
                     </Link>
+                  </Cell>
+                  <Cell>
+                    <Badge tone={r.provider === "demo" ? "warning" : "success"}>
+                      {r.provider === "demo" ? "Demo" : "Live"}
+                    </Badge>
                   </Cell>
                   <Cell>
                     <Badge tone={r.status === "COMPLETED" ? "success" : r.status === "FAILED" ? "danger" : "info"}>
@@ -57,7 +62,9 @@ export default async function EvaluationsPage() {
                   </Cell>
                   <Cell className="text-ink-700">{m ? `${Math.round(m.intentAccuracy * 100)}%` : "—"}</Cell>
                   <Cell className="text-ink-700">{m ? `${Math.round(m.toolAccuracy * 100)}%` : "—"}</Cell>
-                  <Cell className="text-ink-700">{m ? `${Math.round(m.escalationAccuracy * 100)}%` : "—"}</Cell>
+                  <Cell className="text-ink-700">
+                    {m?.ragSuccessRate != null ? `${Math.round(m.ragSuccessRate * 100)}%` : "—"}
+                  </Cell>
                   <Cell className="text-ink-600">{m ? `${m.avgLatencyMs}ms` : "—"}</Cell>
                   <Cell className="text-ink-500">{formatDate(r.createdAt)}</Cell>
                 </Row>

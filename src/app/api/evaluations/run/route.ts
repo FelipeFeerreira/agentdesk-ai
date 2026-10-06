@@ -8,5 +8,12 @@ export async function POST() {
   const user = await requireUser();
   const provider = getLLMProvider();
   const { run, metrics, results } = await runAndPersistEval(user.orgId, evalCases, provider);
-  return NextResponse.json({ ok: true, runId: run.id, metrics, total: results.length });
+  return NextResponse.json({
+    ok: true,
+    runId: run.id,
+    metrics,
+    total: results.length,
+    provider: metrics.provider,
+    mode: metrics.mode,
+  });
 }

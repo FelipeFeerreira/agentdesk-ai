@@ -19,8 +19,9 @@ export function RunEvalButton() {
         setMsg(data.error ?? "Evaluation failed.");
         return;
       }
+      const modeLabel = data.mode === "live" ? "live model" : "demo";
       setMsg(
-        `Completed ${data.total} cases · ${Math.round(data.metrics.intentAccuracy * 100)}% intent accuracy`,
+        `Ran ${data.total} scenarios on the ${modeLabel} provider · ${Math.round(data.metrics.intentAccuracy * 100)}% intent accuracy`,
       );
       router.refresh();
     } finally {

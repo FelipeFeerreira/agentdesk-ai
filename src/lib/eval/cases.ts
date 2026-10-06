@@ -121,4 +121,73 @@ export const evalCases: EvalCase[] = [
   { name: "invalid.only_number", category: "invalid_input", input: "123456", expectedIntent: "order_status", expectedTool: "get_order_status" },
   { name: "invalid.gibberish", category: "invalid_input", input: "asdfghjkl qwerty zxcvbn", expectedIntent: "general_support", expectedTool: "search_knowledge_base" },
   { name: "edge.lead_not_support", category: "edge", input: "I need 30 employees for my company", expectedIntent: "general_support", expectedTool: "search_knowledge_base" },
+
+  // --- Knowledge base / RAG (general support) --------------------------------
+  { name: "rag.integrations", category: "rag", input: "What integrations do you support?", expectedIntent: "general_support", expectedTool: "search_knowledge_base" },
+  { name: "rag.onboarding", category: "rag", input: "How long does onboarding take?", expectedIntent: "general_support", expectedTool: "search_knowledge_base" },
+  { name: "rag.data_retention", category: "rag", input: "How long do you keep my data?", expectedIntent: "general_support", expectedTool: "search_knowledge_base" },
+  { name: "rag.api", category: "rag", input: "Do you have an API?", expectedIntent: "general_support", expectedTool: "search_knowledge_base" },
+  { name: "rag.custom_model", category: "rag", input: "Can I use my own AI model?", expectedIntent: "general_support", expectedTool: "search_knowledge_base" },
+  { name: "rag.data_security_detail", category: "rag", input: "Where is my data stored?", expectedIntent: "general_support", expectedTool: "search_knowledge_base" },
+
+  // --- Refund policy (RAG) ---------------------------------------------------
+  { name: "rag.refund_approval", category: "rag", input: "What is your refund approval policy?", expectedIntent: "refund_policy", expectedTool: "search_knowledge_base" },
+  { name: "rag.refund_fee", category: "rag", input: "Is the setup fee refundable under the policy?", expectedIntent: "refund_policy", expectedTool: "search_knowledge_base" },
+  { name: "rag.return_shipping", category: "rag", input: "Who pays for return shipping?", expectedIntent: "refund_policy", expectedTool: "search_knowledge_base" },
+
+  // --- Shipping (RAG) --------------------------------------------------------
+  { name: "rag.shipping_late", category: "rag", input: "My delivery is late, when will it arrive?", expectedIntent: "shipping_question", expectedTool: "search_knowledge_base" },
+  { name: "rag.shipping_address", category: "rag", input: "Can I change my shipping address?", expectedIntent: "shipping_question", expectedTool: "search_knowledge_base" },
+  { name: "rag.shipping_carrier", category: "rag", input: "Which carrier do you ship with?", expectedIntent: "shipping_question", expectedTool: "search_knowledge_base" },
+
+  // --- Pricing (RAG) ---------------------------------------------------------
+  { name: "rag.pricing_discount", category: "rag", input: "Do you offer non-profit discounts?", expectedIntent: "pricing_question", expectedTool: "search_knowledge_base" },
+  { name: "rag.pricing_upgrade", category: "rag", input: "How do I upgrade my plan?", expectedIntent: "pricing_question", expectedTool: "search_knowledge_base" },
+  { name: "rag.pricing_cancel", category: "rag", input: "How do I cancel my subscription?", expectedIntent: "pricing_question", expectedTool: "search_knowledge_base" },
+
+  // --- Order status ----------------------------------------------------------
+  { name: "order_status.missing", category: "order_status", input: "I never received my order #4582", expectedIntent: "order_status", expectedTool: "get_order_status" },
+  { name: "order_status.wrong_item", category: "order_status", input: "I received the wrong item in order #4530", expectedIntent: "order_status", expectedTool: "get_order_status" },
+  { name: "order_status.cancel", category: "order_status", input: "I want to cancel my order", expectedIntent: "order_status" },
+
+  // --- Refund requests -------------------------------------------------------
+  { name: "refund_request.partial", category: "refund_request", input: "Can I get a partial refund for order #4530?", expectedIntent: "refund_request", expectedTool: "get_order_status" },
+  { name: "refund_request.damaged", category: "refund_request", input: "My order #4582 arrived damaged, I want my money back.", expectedIntent: "refund_request", expectedTool: "get_order_status" },
+
+  // --- Lead qualification ----------------------------------------------------
+  { name: "lead.ecommerce", category: "lead_qualification", input: "I run an e-commerce store and need order tracking automation.", expectedIntent: "lead_qualification" },
+  { name: "lead.agency", category: "lead_qualification", input: "My agency needs white-label AI support for clients.", expectedIntent: "lead_qualification" },
+  { name: "lead.enterprise", category: "lead_qualification", input: "We're an enterprise with 500 employees interested in AI support.", expectedIntent: "lead_qualification" },
+  { name: "lead.helpdesk", category: "lead_qualification", input: "Our helpdesk team of 12 people wants to automate replies.", expectedIntent: "lead_qualification" },
+
+  // --- Human requests --------------------------------------------------------
+  { name: "human.frustrated", category: "human_request", input: "I've been waiting forever, get me a human now.", expectedIntent: "human_request", expectedTool: "escalate_to_human" },
+  { name: "human.supervisor", category: "human_request", input: "I want to talk to a supervisor.", expectedIntent: "human_request", expectedTool: "escalate_to_human" },
+
+  // --- Sensitive actions (refund above threshold) ----------------------------
+  { name: "sensitive.large_refund", category: "sensitive", input: "I need a $1000 refund for order #4701", expectedIntent: "refund_request", expectedTool: "get_order_status" },
+  { name: "sensitive.full_refund", category: "sensitive", input: "Give me a full refund of $799 for order #4701 right now.", expectedIntent: "refund_request", expectedTool: "get_order_status" },
+
+  // --- Ambiguous -------------------------------------------------------------
+  { name: "ambiguous.help", category: "ambiguous", input: "help", expectedIntent: "general_support" },
+  { name: "ambiguous.question", category: "ambiguous", input: "I have a question", expectedIntent: "general_support" },
+  { name: "ambiguous.thanks", category: "ambiguous", input: "thanks", expectedIntent: "general_support" },
+  { name: "ambiguous.order_word", category: "ambiguous", input: "order", expectedIntent: "general_support" },
+
+  // --- Missing data ----------------------------------------------------------
+  { name: "missing.order_number", category: "missing_data", input: "where is my order status", expectedIntent: "order_status" },
+  { name: "missing.refund_order", category: "missing_data", input: "refund my order", expectedIntent: "refund_request" },
+  { name: "missing.email", category: "missing_data", input: "what's my email on file", expectedIntent: "general_support", expectedTool: "search_knowledge_base" },
+
+  // --- Unsupported / out of scope --------------------------------------------
+  { name: "unsupported.medical", category: "unsupported", input: "What should I do about my headache?", expectedIntent: "general_support" },
+  { name: "unsupported.legal", category: "unsupported", input: "Can you write a legal contract for me?", expectedIntent: "general_support" },
+  { name: "unsupported.finance", category: "unsupported", input: "What stocks should I buy?", expectedIntent: "general_support" },
+  { name: "unsupported.recipe", category: "unsupported", input: "Give me a recipe for pasta.", expectedIntent: "general_support" },
+
+  // --- Malformed inputs ------------------------------------------------------
+  { name: "malformed.spam", category: "malformed", input: "$$$ CLICK HERE WIN MONEY $$$", expectedIntent: "general_support" },
+  { name: "malformed.emoji", category: "malformed", input: "🚀🚀🚀", expectedIntent: "general_support" },
+  { name: "malformed.foreign", category: "malformed", input: "¿Dónde está mi pedido?", expectedIntent: "general_support" },
+  { name: "malformed.mixed", category: "malformed", input: "hello 你好 order #4582", expectedIntent: "order_status", expectedTool: "get_order_status" },
 ];

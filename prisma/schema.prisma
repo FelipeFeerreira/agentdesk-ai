@@ -474,6 +474,7 @@ model EvaluationRun {
   id          String        @id @default(cuid())
   orgId       String
   name        String
+  provider    String        @default("demo") // "demo" | "openai" — distinguishes DEMO vs LIVE runs
   status      EvalRunStatus @default(PENDING)
   totalCases  Int           @default(0)
   passedCases Int           @default(0)

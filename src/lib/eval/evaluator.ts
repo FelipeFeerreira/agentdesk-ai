@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getLLMProviderForTest } from "@/lib/ai/providers";
+import { retrieveChunks } from "@/lib/rag/vectorstore";
 import type { LLMProvider } from "@/lib/ai/types";
 import type { EvalCase } from "./cases";
 
@@ -27,9 +28,30 @@ export interface EvalRunMetrics {
   intentAccuracy: number;
   toolAccuracy: number;
   escalationAccuracy: number;
+  /** RAG retrieval success over knowledge-base cases (null when no such cases). */
+  ragSuccessRate: number | null;
+  /** How out-of-scope requests were handled (null when no such cases). */
+  unsupportedHandlingRate: number | null;
   avgLatencyMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  /** Transparent token-based estimate, labelled clearly in the UI. */
   estimatedCostUsd: number;
+  provider: string;
+  mode: "demo" | "live";
 }
+
+// Tools that read/write real business data — out-of-scope requests must not reach these.
+const DATA_TOOLS = new Set([
+  "get_order_status",
+  "refund_order",
+  "get_customer_profile",
+  "create_crm_contact",
+  "create_crm_deal",
+]);
+
+const RAG_TOOL = "search_knowledge_base";
 
 /**
  * Evaluates the agent's decision layer (intent classification, tool selection,
@@ -91,7 +113,33 @@ export async function evaluateCases(
   return results;
 }
 
-export function aggregateMetrics(results: EvalCaseResult[]): EvalRunMetrics {
+/**
+ * Measures RAG retrieval success: for every case that should consult the
+ * knowledge base, verify that semantic retrieval actually returns one or more
+ * relevant chunks from the seeded knowledge base. Runs against the live DB.
+ */
+export async function evaluateRagRetrieval(
+  orgId: string,
+  cases: EvalCase[],
+): Promise<{ total: number; success: number }> {
+  const ragCases = cases.filter((c) => c.expectedTool === RAG_TOOL);
+  let success = 0;
+  for (const c of ragCases) {
+    try {
+      const { chunks } = await retrieveChunks(orgId, c.input);
+      if (chunks.length > 0) success += 1;
+    } catch {
+      // a retrieval error counts as a failure for this case
+    }
+  }
+  return { total: ragCases.length, success };
+}
+
+export function aggregateMetrics(
+  results: EvalCaseResult[],
+  rag: { total: number; success: number },
+  provider: LLMProvider,
+): EvalRunMetrics {
   const total = results.length;
   const passed = results.filter((r) => r.passed).length;
   const intentCorrect = results.filter((r) => r.intentMatch).length;
@@ -99,9 +147,20 @@ export function aggregateMetrics(results: EvalCaseResult[]): EvalRunMetrics {
   const toolCorrect = toolCases.filter((r) => r.toolMatch).length;
   const escCases = results.filter((r) => r.expectedEscalate !== undefined);
   const escCorrect = escCases.filter((r) => r.escalateMatch).length;
+
+  const unsupportedCases = results.filter((r) => r.category === "unsupported");
+  const unsupportedHandled = unsupportedCases.filter(
+    (r) => !r.actualTool || !DATA_TOOLS.has(r.actualTool),
+  ).length;
+
   const avgLatencyMs = Math.round(
     results.reduce((s, r) => s + r.latencyMs, 0) / Math.max(1, total),
   );
+
+  const promptTokens = provider.usage?.promptTokens ?? 0;
+  const completionTokens = provider.usage?.completionTokens ?? 0;
+  const totalTokens = promptTokens + completionTokens;
+  const estimatedCostUsd = estimateCost(process.env.OPENAI_MODEL ?? "gpt-4o-mini", promptTokens, completionTokens);
 
   return {
     total,
@@ -110,10 +169,28 @@ export function aggregateMetrics(results: EvalCaseResult[]): EvalRunMetrics {
     intentAccuracy: round(intentCorrect / Math.max(1, total)),
     toolAccuracy: round(toolCorrect / Math.max(1, toolCases.length)),
     escalationAccuracy: round(escCorrect / Math.max(1, escCases.length)),
+    ragSuccessRate: rag.total > 0 ? round(rag.success / rag.total) : null,
+    unsupportedHandlingRate:
+      unsupportedCases.length > 0 ? round(unsupportedHandled / unsupportedCases.length) : null,
     avgLatencyMs,
-    // Transparent demo cost model — no real provider spend.
-    estimatedCostUsd: Number((total * 0.001).toFixed(3)),
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    estimatedCostUsd,
+    provider: provider.name,
+    mode: provider.isDemo ? "demo" : "live",
   };
+}
+
+/** Transparent cost estimate from actual token usage. Rates are labelled estimates. */
+function estimateCost(model: string, promptTokens: number, completionTokens: number): number {
+  const rates: Record<string, { input: number; output: number }> = {
+    "gpt-4o-mini": { input: 0.15, output: 0.6 },
+    "gpt-4o": { input: 2.5, output: 10 },
+  };
+  const r = rates[model] ?? { input: 0.15, output: 0.6 };
+  const costUsd = (promptTokens / 1_000_000) * r.input + (completionTokens / 1_000_000) * r.output;
+  return Number(costUsd.toFixed(6));
 }
 
 function round(n: number): number {
@@ -125,12 +202,21 @@ export async function runAndPersistEval(
   cases: EvalCase[],
   provider?: LLMProvider,
 ) {
+  const p = getLLMProviderForTest(provider);
+
   const run = await prisma.evaluationRun.create({
-    data: { orgId, name: `Evaluation ${new Date().toLocaleString()}`, status: "RUNNING", totalCases: cases.length },
+    data: {
+      orgId,
+      name: `Evaluation ${new Date().toLocaleString()}`,
+      provider: p.name,
+      status: "RUNNING",
+      totalCases: cases.length,
+    },
   });
 
-  const results = await evaluateCases(cases, provider);
-  const metrics = aggregateMetrics(results);
+  const results = await evaluateCases(cases, p);
+  const rag = await evaluateRagRetrieval(orgId, cases);
+  const metrics = aggregateMetrics(results, rag, p);
 
   await prisma.$transaction(
     results.map((r) =>
