@@ -1,3 +1,7 @@
+// GENERATED FILE — do not edit by hand.
+// Source of truth: prisma/schema.prisma (SQLite demo).
+// Regenerate with: npm run prisma:pg:schema
+// Provider is switched to PostgreSQL for production (see prisma/pgvector.sql).
 // AgentDesk AI — data model
 //
 // Local/demo development uses SQLite (zero external dependencies) so the whole
@@ -9,7 +13,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

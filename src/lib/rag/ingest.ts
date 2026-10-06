@@ -1,7 +1,9 @@
+import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import type { DocType } from "@prisma/client";
 import { chunkText } from "./chunker";
 import { getEmbedder } from "./embedder";
+import { isPgvectorEnabled } from "./store";
 
 export interface IngestInput {
   orgId: string;
@@ -11,54 +13,53 @@ export interface IngestInput {
   text: string;
 }
 
+function contentHash(text: string): string {
+  return createHash("sha256").update(text.replace(/\s+/g, " ").trim()).digest("hex");
+}
+
 /**
  * Full document ingestion pipeline:
- * text -> normalize -> chunk -> embed -> persist (KnowledgeDocument + chunks).
+ * text → normalize → content-hash → chunk → embed → persist.
+ *
+ * Guarantees:
+ *  - duplicate indexing is avoided by a per-org content hash (idempotent re-upload)
+ *  - when pgvector is enabled the native `embeddingVector` column is populated
+ *  - failures mark the document FAILED with a visible reason (retry by re-upload/reindex)
  */
 export async function ingestDocument(input: IngestInput): Promise<string> {
-  const document = await prisma.knowledgeDocument.create({
-    data: {
-      orgId: input.orgId,
-      title: input.title,
-      source: input.source,
-      type: input.type,
-      status: "PROCESSING",
-    },
+  const hash = contentHash(input.text);
+
+  const existing = await prisma.knowledgeDocument.findFirst({
+    where: { orgId: input.orgId, contentHash: hash },
   });
+
+  // Idempotent: the exact same content is already indexed.
+  if (existing && existing.status === "READY") {
+    return existing.id;
+  }
+
+  const document = existing
+    ? await prisma.knowledgeDocument.update({
+        where: { id: existing.id },
+        data: { title: input.title, source: input.source, type: input.type, status: "PROCESSING", error: null },
+      })
+    : await prisma.knowledgeDocument.create({
+        data: {
+          orgId: input.orgId,
+          title: input.title,
+          source: input.source,
+          type: input.type,
+          status: "PROCESSING",
+          contentHash: hash,
+        },
+      });
 
   try {
     const chunks = chunkText(input.text);
     if (chunks.length === 0) {
       throw new Error("Document contained no extractable text.");
     }
-
-    const embedder = getEmbedder();
-    await prisma.$transaction(
-      chunks.map((content, index) =>
-        prisma.knowledgeChunk.create({
-          data: {
-            documentId: document.id,
-            orgId: input.orgId,
-            content,
-            index,
-            embedding: "[]",
-          },
-        }),
-      ),
-    );
-
-    const created = await prisma.knowledgeChunk.findMany({
-      where: { documentId: document.id },
-      orderBy: { index: "asc" },
-    });
-
-    for (const chunk of created) {
-      const embedding = await embedder.embed(chunk.content);
-      await prisma.knowledgeChunk.update({
-        where: { id: chunk.id },
-        data: { embedding: JSON.stringify(embedding) },
-      });
-    }
+    await persistChunks(document.id, input.orgId, chunks);
 
     await prisma.knowledgeDocument.update({
       where: { id: document.id },
@@ -76,6 +77,40 @@ export async function ingestDocument(input: IngestInput): Promise<string> {
     });
     throw err;
   }
+}
+
+/**
+ * Replace a document's chunks: delete old chunks, embed the new ones, and — when
+ * pgvector is enabled — populate the native `embeddingVector` column. Used by
+ * both ingestion and reindexing so the two paths can never drift.
+ */
+export async function persistChunks(
+  documentId: string,
+  orgId: string,
+  chunks: string[],
+): Promise<number> {
+  await prisma.knowledgeChunk.deleteMany({ where: { documentId } });
+
+  const embedder = getEmbedder();
+  const pgvector = isPgvectorEnabled();
+
+  for (let index = 0; index < chunks.length; index++) {
+    const content = chunks[index];
+    const embedding = await embedder.embed(content);
+    const created = await prisma.knowledgeChunk.create({
+      data: { documentId, orgId, content, index, embedding: JSON.stringify(embedding) },
+    });
+
+    if (pgvector) {
+      const vector = `[${embedding.join(",")}]`;
+      await prisma.$executeRaw`
+        UPDATE "KnowledgeChunk"
+        SET "embeddingVector" = ${vector}::vector
+        WHERE id = ${created.id}
+      `;
+    }
+  }
+  return chunks.length;
 }
 
 /**
