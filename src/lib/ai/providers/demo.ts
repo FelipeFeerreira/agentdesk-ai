@@ -5,16 +5,19 @@ import type {
   StepDecision,
 } from "../types";
 
-const NUMBER_RE = /#?\s*(?<!\d)(\d{4,6})(?!\d)/;
 const AMOUNT_RE = /\$\s?(\d+(?:[.,]\d{1,2})?)|(\d+(?:[.,]\d{1,2})?)\s?(?:usd|dollars?)/i;
 
 export function extractOrderNumber(message: string): string | undefined {
-  const m = message.match(NUMBER_RE);
-  if (!m) return undefined;
-  const before = message.slice(0, m.index ?? 0);
-  // A number immediately preceded by a currency symbol is a price, not an order id.
-  if (/[$€£]\s*$/.test(before)) return undefined;
-  return m[1];
+  const re = /#?\s*(?<!\d)(\d{4,6})(?!\d)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(message)) !== null) {
+    const before = message.slice(0, m.index);
+    // A number immediately preceded by a currency symbol is a price, not an order id.
+    if (!/[$€£]\s*$/.test(before)) {
+      return m[1];
+    }
+  }
+  return undefined;
 }
 
 export function extractAmountCents(message: string): number | undefined {
@@ -40,13 +43,13 @@ export class DemoProvider implements LLMProvider {
 
     // Refund policy / returns questions (checked before refund requests).
     if (
-      (/\b(refund|refud|refond)\b/.test(m) && /(policy|polisy|polici|window|period|\bdays\b|\blong\b)/.test(m)) ||
+      (/(refund|refud|refond)/.test(m) && /(policy|polisy|polici|window|period|\bdays\b|\blong\b)/.test(m)) ||
       /\breturns?\b/.test(m)
     ) {
       return { intent: "refund_policy", confidence: 0.93 };
     }
     // Any other mention of a refund is treated as a refund request.
-    if (/refund|refond|refud/.test(m)) {
+    if (/refund|refond|refud|money back/.test(m)) {
       return { intent: "refund_request", confidence: 0.9 };
     }
 
@@ -55,22 +58,22 @@ export class DemoProvider implements LLMProvider {
     if (orderNum) {
       return { intent: "order_status", confidence: 0.96, entities: { orderNumber: orderNum } };
     }
-    if (/\b(order|package|parcel|shipment|tracking)\b/.test(m) && /(where|status|track|ship|when|arrive|deliver)/.test(m)) {
+    if (/\b(order|package|parcel|shipment|tracking)\b/.test(m) && /(where|status|when|arrive|\bdeliver|\bship\b|\btrack\b|cancel)/.test(m)) {
       return { intent: "order_status", confidence: 0.8 };
     }
 
     if (/(shipping|\bship\b|delivery|ship time)/.test(m)) {
       return { intent: "shipping_question", confidence: 0.85 };
     }
-    if (/(pricing|price|cost|how much|\bplans?\b|\btiers?\b|\btrial\b|\bdiscount\b|subscription)/.test(m)) {
+    if (/(pricing|price|cost|how much|\bplans?\b|\btiers?\b|\btrial\b|\bdiscounts?\b|subscription)/.test(m)) {
       return { intent: "pricing_question", confidence: 0.85 };
     }
     if (/(\bspeak to\b|\btalk to\b|\ba human\b|\ba person\b|\ban agent\b|real (person|human)|representative|operator|customer service)/.test(m)) {
       return { intent: "human_request", confidence: 0.92 };
     }
     // Lead qualification: buy signal + company size / budget / company word.
-    const buySignal = /(need|looking for|want|interested|looking to|searching for)/.test(m) && /(automation|ai|customer support|support|agent|chatbot|bot)/.test(m);
-    const companySignal = /(\d+)\s*(employees?|people|staff|person|seats)/.test(m) || /\b(company|business|startup|team|organization)\b/.test(m);
+    const buySignal = /(need|looking for|want|interested|looking to|searching for)/.test(m) && /(automation|automate|ai|customer support|support|agent|chatbot|bot)/.test(m);
+    const companySignal = /(\d+)\s*(employees?|people|staff|person|seats)/.test(m) || /\b(company|business|startup|team|organization|agency|store|shop)\b/.test(m);
     const budgetSignal = /budget|\$\s?\d/.test(m);
     if (buySignal && (companySignal || budgetSignal)) {
       return { intent: "lead_qualification", confidence: 0.88 };
