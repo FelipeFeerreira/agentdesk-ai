@@ -120,8 +120,9 @@ export class OpenAIEmbedder implements Embedder {
 }
 
 export function getEmbedder(): Embedder {
+  const demoMode = (process.env.DEMO_MODE ?? "true") !== "false";
   const provider = process.env.EMBEDDING_PROVIDER ?? "demo";
-  if (provider === "openai" && process.env.OPENAI_API_KEY) {
+  if (!demoMode && provider === "openai" && process.env.OPENAI_API_KEY) {
     return new OpenAIEmbedder();
   }
   return new DemoEmbedder();

@@ -31,11 +31,16 @@ function getClient(): OpenAI | null {
 }
 
 function toFunctionDefinition() {
-  return tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    parameters: z.toJSONSchema(t.schema as zt.ZodTypeAny),
-  }));
+  return tools.map((t) => {
+    const schema = z.toJSONSchema(t.schema as zt.ZodTypeAny) as Record<string, unknown>;
+    // OpenAI rejects the JSON-Schema `$schema` keyword inside function parameters.
+    delete schema.$schema;
+    return {
+      name: t.name,
+      description: t.description,
+      parameters: schema,
+    };
+  });
 }
 
 const INTENTS: { value: Intent; description: string }[] = [
@@ -53,9 +58,22 @@ const INTENTS: { value: Intent; description: string }[] = [
 export class OpenAIProvider implements LLMProvider {
   name = "openai";
   isDemo = false;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
 
   private get model() {
     return process.env.OPENAI_MODEL || "gpt-4o-mini";
+  }
+
+  private trackUsage(u?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }) {
+    if (!u) return;
+    const promptTokens = u.prompt_tokens ?? 0;
+    const completionTokens = u.completion_tokens ?? 0;
+    const totalTokens = u.total_tokens ?? promptTokens + completionTokens;
+    this.usage = {
+      promptTokens: (this.usage?.promptTokens ?? 0) + promptTokens,
+      completionTokens: (this.usage?.completionTokens ?? 0) + completionTokens,
+      totalTokens: (this.usage?.totalTokens ?? 0) + totalTokens,
+    };
   }
 
   async classifyIntent(message: string, history: string[]): Promise<IntentResult> {
@@ -75,6 +93,7 @@ export class OpenAIProvider implements LLMProvider {
       ],
       response_format: { type: "json_object" },
     });
+    this.trackUsage(res.usage);
 
     const raw = res.choices[0]?.message?.content ?? "{}";
     try {
@@ -104,6 +123,7 @@ export class OpenAIProvider implements LLMProvider {
       tools: toFunctionDefinition().map((f) => ({ type: "function" as const, function: f })),
       tool_choice: "auto",
     });
+    this.trackUsage(res.usage);
 
     const msg = res.choices[0]?.message;
     if (msg?.tool_calls && msg.tool_calls.length > 0) {
@@ -139,6 +159,7 @@ export class OpenAIProvider implements LLMProvider {
       temperature: 0.3,
       messages,
     });
+    this.trackUsage(res.usage);
     return res.choices[0]?.message?.content ?? "I'm sorry, I couldn't generate a response.";
   }
 }

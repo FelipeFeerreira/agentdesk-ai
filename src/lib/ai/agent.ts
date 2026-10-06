@@ -75,11 +75,21 @@ export async function handleCustomerMessage(
 
   const history = await loadHistory(input.conversationId);
 
-  // 1) Classify intent.
-  const intentResult = await provider.classifyIntent(
-    input.message,
-    history.map((h) => h.content),
-  );
+  // 1) Classify intent. A live provider outage must not crash the conversation —
+  //    it degrades to a graceful human escalation instead.
+  let intentResult: BaseContext["intent"];
+  try {
+    intentResult = await provider.classifyIntent(
+      input.message,
+      history.map((h) => h.content),
+    );
+  } catch (e) {
+    return providerFailureResult(
+      input,
+      "AI provider unavailable during intent classification",
+      e,
+    );
+  }
   await prisma.conversation.update({
     where: { id: input.conversationId },
     data: { intent: intentResult.intent, aiConfidence: intentResult.confidence, updatedAt: new Date() },
@@ -241,13 +251,22 @@ async function runSupportLoop(
       sources: base.sources,
     };
 
-    const decision = await provider.planStep(stepInput);
+    let decision;
+    try {
+      decision = await provider.planStep(stepInput);
+    } catch (e) {
+      return providerFailureResult(input, "AI provider unavailable during tool planning", e);
+    }
 
     if (decision.type === "respond") {
-      finalContent =
-        decision.content && decision.content.length > 0
-          ? decision.content
-          : await provider.generateResponse(stepInput);
+      try {
+        finalContent =
+          decision.content && decision.content.length > 0
+            ? decision.content
+            : await provider.generateResponse(stepInput);
+      } catch (e) {
+        return providerFailureResult(input, "AI provider unavailable during response generation", e);
+      }
       break;
     }
 
@@ -406,6 +425,53 @@ async function createEscalation(
   return prisma.escalation.create({
     data: { orgId, conversationId, reason, aiSummary: summary, status: "OPEN" },
   });
+}
+
+/**
+ * Degrade a live-provider outage to a graceful human escalation: log the
+ * failure, flag the conversation for review, and give the customer a friendly
+ * message rather than crashing the request.
+ */
+async function providerFailureResult(
+  input: AgentMessageInput,
+  reason: string,
+  error: unknown,
+): Promise<AgentResult> {
+  const message = error instanceof Error ? error.message : "Unknown provider error";
+  await audit(input.orgId, {
+    event: "ai.provider.failed",
+    integration: "CORE",
+    conversationId: input.conversationId,
+    status: "FAILED",
+    metadata: { reason, error: message },
+  });
+
+  const esc = await createEscalation(
+    input.orgId,
+    input.conversationId,
+    reason,
+    "The AI provider returned an error and could not process the request. A human should review.",
+  );
+  await prisma.conversation.update({
+    where: { id: input.conversationId },
+    data: { status: "NEEDS_HUMAN_REVIEW", escalationReason: reason },
+  });
+
+  const content =
+    "I'm having a temporary issue right now. I've flagged your request for our team, and someone will follow up shortly.";
+  const msg = await createAssistantMessage(input.conversationId, content);
+
+  return {
+    assistantMessageId: msg.id,
+    assistantContent: content,
+    intent: "general_support",
+    confidence: 0,
+    toolCalls: [],
+    escalated: true,
+    escalationId: esc.id,
+    status: "NEEDS_HUMAN_REVIEW",
+    sources: [],
+  };
 }
 
 async function createAssistantMessage(

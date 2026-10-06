@@ -65,6 +65,8 @@ export interface AgentStepInput {
 export interface LLMProvider {
   name: string;
   isDemo: boolean;
+  /** Accumulated token usage across calls (live providers only). */
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
   classifyIntent(message: string, history: string[]): Promise<IntentResult>;
   planStep(input: AgentStepInput): Promise<StepDecision>;
   generateResponse(input: AgentStepInput): Promise<string>;
