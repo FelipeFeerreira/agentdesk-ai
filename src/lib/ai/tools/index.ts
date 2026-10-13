@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { retrieveChunks } from "@/lib/rag/vectorstore";
 import { parseSettings } from "@/lib/settings";
 import { enqueueJob } from "@/lib/automation/jobs";
+import { applyRefund } from "@/lib/refunds";
 import type { ToolContext, ToolDefinition, ToolResult } from "../types";
 import type { LeadStatus } from "@prisma/client";
 import { isDemoMode } from "@/lib/security/mode";
@@ -291,17 +292,12 @@ export const tools: ToolDefinition[] = [
       if (!order || !canAccessOrder(order, ctx)) {
         return err(`No order found with number "${a.orderNumber}".`);
       }
-      // Eligibility and amount validation.
-      if (order.status === "REFUNDED") {
-        return err(`Order ${order.orderNumber} has already been refunded.`);
-      }
       if (order.status === "CANCELLED") {
         return err(`Order ${order.orderNumber} is cancelled and cannot be refunded.`);
       }
-      if (a.amountCents > order.totalCents) {
-        return err(
-          `Refund amount exceeds the order total of ${(order.totalCents / 100).toFixed(2)} ${order.currency}.`,
-        );
+      const remaining = order.totalCents - order.refundedCents;
+      if (remaining <= 0) {
+        return err(`Order ${order.orderNumber} is already fully refunded.`);
       }
 
       const settings = parseSettings(ctx.organization.settings);
@@ -321,14 +317,16 @@ export const tools: ToolDefinition[] = [
         };
       }
 
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { status: "REFUNDED" },
-      });
+      const outcome = await prisma.$transaction((tx) =>
+        applyRefund(tx, { orgId: ctx.orgId, orderNumber: order.orderNumber, amountCents: a.amountCents }),
+      );
+      if (!outcome.ok) return err(outcome.error ?? "Refund failed.");
+
       return ok({
         orderNumber: a.orderNumber,
-        refundedCents: a.amountCents,
-        status: "REFUNDED",
+        refundedCents: outcome.refundedCents,
+        remainingCents: outcome.remainingCents,
+        status: outcome.status,
         currency: order.currency,
         // Demo refunds are simulations — no real payment is issued.
         simulated: isDemoMode(),

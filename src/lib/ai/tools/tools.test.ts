@@ -136,6 +136,9 @@ describe("tool execution (refund threshold + escalation)", () => {
     await prisma.order.create({
       data: { orgId: org.id, customerId: customer.id, orderNumber: "4582", status: "PROCESSING", totalCents: 79900, placedAt: new Date(), items: "[]" },
     });
+    await prisma.order.create({
+      data: { orgId: org.id, customerId: customer.id, orderNumber: "4530", status: "DELIVERED", totalCents: 4900, placedAt: new Date(), items: "[]" },
+    });
     const conversation = await prisma.conversation.create({
       data: { orgId: org.id, customerId: customer.id, channel: "WEB" },
     });
@@ -160,7 +163,7 @@ describe("tool execution (refund threshold + escalation)", () => {
     expect(order?.status).toBe("PROCESSING"); // unchanged
   });
 
-  it("refund under the approval threshold is processed", async () => {
+  it("a partial refund records against the balance without marking it fully refunded", async () => {
     const result = await getTool("refund_order")!.execute(
       { orderNumber: "4582", amountCents: 4900 },
       ctx,
@@ -170,6 +173,21 @@ describe("tool execution (refund threshold + escalation)", () => {
     const order = await prisma.order.findUnique({
       where: { orgId_orderNumber: { orgId: ctx.orgId, orderNumber: "4582" } },
     });
+    expect(order?.refundedCents).toBe(4900);
+    expect(order?.status).toBe("PROCESSING"); // partial → not REFUNDED
+  });
+
+  it("refunding the full balance marks the order REFUNDED", async () => {
+    const result = await getTool("refund_order")!.execute(
+      { orderNumber: "4530", amountCents: 4900 }, // equals the order total
+      ctx,
+    );
+    expect(result.ok).toBe(true);
+
+    const order = await prisma.order.findUnique({
+      where: { orgId_orderNumber: { orgId: ctx.orgId, orderNumber: "4530" } },
+    });
+    expect(order?.refundedCents).toBe(4900);
     expect(order?.status).toBe("REFUNDED");
   });
 

@@ -55,10 +55,11 @@ describe("order ownership (connected mode)", () => {
     expect(order?.status).toBe("PROCESSING");
   });
 
-  it("rejects refunds exceeding the order total", async () => {
+  it("rejects refunds exceeding the remaining balance", async () => {
     process.env.DEMO_MODE = "false";
-    const res = await getTool("refund_order")!.execute({ orderNumber: "9001", amountCents: 999_999 }, ctxOwner);
+    // 6000 <= approval threshold (10000) but > order total (5000) → balance error.
+    const res = await getTool("refund_order")!.execute({ orderNumber: "9001", amountCents: 6000 }, ctxOwner);
     expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/exceeds the order total/i);
+    expect(res.error).toMatch(/remaining balance/i);
   });
 });

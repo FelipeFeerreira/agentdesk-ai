@@ -2,26 +2,26 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { requireRole } from "@/lib/auth/guards";
+import { refundActionSchema, applyRefund } from "@/lib/refunds";
 import { audit } from "@/lib/observability/audit";
 
 const schema = z.object({ decision: z.enum(["approve", "reject"]) });
 
-interface ProposedAction {
-  action?: string;
-  orderNumber?: string;
-  amountCents?: number;
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "HttpError";
+  }
 }
 
 /**
  * Approve or reject a pending escalation.
  *
- * Safety:
- *  - only OWNER/ADMIN may decide a sensitive action;
- *  - the decision is tied to the escalation's stored `proposedAction` (no
- *    ambiguous tool-call lookup);
- *  - the OPEN → decided transition is atomic (`updateMany` guarded on OPEN), so
- *    two concurrent approvals cannot both execute the side effect;
- *  - the refund is applied only after winning that transition.
+ * - only OWNER/ADMIN may decide;
+ * - the proposed action is validated (Zod + business rules) BEFORE any effect;
+ * - the escalation transition and the local refund are ONE transaction, so a
+ *   failure leaves the escalation OPEN (safe retry) and never approves without
+ *   executing, or executes without approving.
  */
 export async function POST(
   request: Request,
@@ -39,62 +39,65 @@ export async function POST(
 
   const escalation = await prisma.escalation.findFirst({
     where: { id, orgId: user.orgId },
+    include: { conversation: { select: { customerId: true } } },
   });
   if (!escalation) {
     return NextResponse.json({ error: "Escalation not found." }, { status: 404 });
   }
 
-  // Atomic state transition: only one caller can move it out of OPEN.
-  const transition = await prisma.escalation.updateMany({
-    where: { id, orgId: user.orgId, status: "OPEN" },
-    data: {
-      status: approve ? "APPROVED" : "REJECTED",
-      decidedByUserId: user.userId,
-      decidedAt: new Date(),
-    },
-  });
-  if (transition.count === 0) {
-    return NextResponse.json({ error: "Escalation already decided." }, { status: 409 });
-  }
-
-  // Execute the approved action exactly once.
-  if (approve) {
-    const proposed = (escalation.proposedAction
-      ? JSON.parse(escalation.proposedAction)
-      : null) as ProposedAction | null;
-
-    if (proposed?.action === "refund" && proposed.orderNumber && proposed.amountCents) {
-      const order = await prisma.order.findUnique({
-        where: { orgId_orderNumber: { orgId: user.orgId, orderNumber: proposed.orderNumber } },
-      });
-      if (!order) {
-        await audit(user.orgId, {
-          event: "escalation.refund.failed",
-          integration: "CORE",
-          conversationId: escalation.conversationId,
-          status: "FAILED",
-          metadata: { escalationId: id, error: "order not found" },
-        });
-      } else if (order.status === "REFUNDED") {
-        // Idempotent: already refunded — nothing more to do.
-      } else if (proposed.amountCents > order.totalCents) {
-        await audit(user.orgId, {
-          event: "escalation.refund.failed",
-          integration: "CORE",
-          conversationId: escalation.conversationId,
-          status: "FAILED",
-          metadata: { escalationId: id, error: "amount exceeds order total" },
-        });
-      } else {
-        await prisma.order.update({ where: { id: order.id }, data: { status: "REFUNDED" } });
-      }
+  // Validate the proposed action up front (never act on a malformed action).
+  let refundAction: { orderNumber: string; amountCents: number } | null = null;
+  if (escalation.proposedAction) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(escalation.proposedAction);
+    } catch {
+      return NextResponse.json({ error: "Escalation has a malformed proposed action." }, { status: 422 });
     }
+    const actionParsed = refundActionSchema.safeParse(raw);
+    if (!actionParsed.success) {
+      return NextResponse.json({ error: "Escalation has an invalid proposed action." }, { status: 422 });
+    }
+    refundAction = { orderNumber: actionParsed.data.orderNumber, amountCents: actionParsed.data.amountCents };
   }
 
-  await prisma.conversation.update({
-    where: { id: escalation.conversationId },
-    data: { status: "HUMAN_ACTIVE", ownerUserId: user.userId },
-  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      const transition = await tx.escalation.updateMany({
+        where: { id, orgId: user.orgId, status: "OPEN" },
+        data: {
+          status: approve ? "APPROVED" : "REJECTED",
+          decidedByUserId: user.userId,
+          decidedAt: new Date(),
+        },
+      });
+      if (transition.count === 0) {
+        throw new HttpError(409, "Escalation already decided.");
+      }
+
+      if (approve && refundAction) {
+        const outcome = await applyRefund(tx, {
+          orgId: user.orgId,
+          orderNumber: refundAction.orderNumber,
+          amountCents: refundAction.amountCents,
+          customerId: escalation.conversation.customerId,
+        });
+        if (!outcome.ok) {
+          throw new HttpError(422, outcome.error ?? "Refund could not be applied.");
+        }
+      }
+
+      await tx.conversation.update({
+        where: { id: escalation.conversationId },
+        data: { status: "HUMAN_ACTIVE", ownerUserId: user.userId },
+      });
+    });
+  } catch (e) {
+    if (e instanceof HttpError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
 
   await audit(user.orgId, {
     event: approve ? "escalation.approved" : "escalation.rejected",
