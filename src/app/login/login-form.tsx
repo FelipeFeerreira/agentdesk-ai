@@ -39,8 +39,9 @@ export function LoginForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-ink-200 bg-white p-6 shadow-[var(--shadow-card)]">
       <div>
-        <Label>Email</Label>
+        <Label htmlFor="email">Email</Label>
         <Input
+          id="email"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -49,8 +50,9 @@ export function LoginForm() {
         />
       </div>
       <div>
-        <Label>Password</Label>
+        <Label htmlFor="password">Password</Label>
         <Input
+          id="password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

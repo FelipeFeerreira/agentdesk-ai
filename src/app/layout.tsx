@@ -13,12 +13,19 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   title: {
     default: "AgentDesk AI — AI Customer Support & Sales Automation",
     template: "%s · AgentDesk AI",
   },
   description:
     "AI agents that actually work with your business. Customer support, lead qualification and automation connected to your real data, tools and workflows.",
+  openGraph: {
+    title: "AgentDesk AI — AI Customer Support & Sales Automation",
+    description:
+      "AI agents that actually work with your business. Customer support, lead qualification and automation connected to real data, tools and workflows.",
+    type: "website",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
