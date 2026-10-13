@@ -66,9 +66,9 @@ Results below were produced locally against the seeded SQLite demo. Run the same
 | --- | --- | --- |
 | Lint | `npm run lint` | ✅ pass (0 errors) |
 | Types | `npm run typecheck` | ✅ pass |
-| Unit / integration | `npm run test` | ✅ 84 passed (12 files) |
+| Unit / integration | `npm run test` | ✅ 94 passed (15 files) |
 | Production build | `npm run build` | ✅ pass |
-| End-to-end | `npm run e2e` | ✅ 3 passed (login, hero flow, escalation) |
+| End-to-end | `npm run e2e` | ✅ 4 passed (login, hero flow, escalation, duplicate-message) |
 | Screenshots | `npm run screenshots` | ✅ 17 real captures in `docs/screenshots/` |
 
 Live-model evaluation (`DEMO_MODE=false` + `OPENAI_API_KEY`) and live HubSpot/WhatsApp/n8n/PostgreSQL verification are **not** run here — they require external credentials and are documented in [`docs/`](docs/).

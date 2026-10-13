@@ -6,6 +6,9 @@ export default defineConfig({
     environment: "node",
     globals: true,
     testTimeout: 20_000,
+    // SQLite has a single writer; running test files in parallel against the
+    // shared test DB causes "Socket timeout" lock contention. Serialize files.
+    fileParallelism: false,
     setupFiles: ["./vitest.setup.ts"],
     globalSetup: ["./vitest.global-setup.ts"],
     env: {
