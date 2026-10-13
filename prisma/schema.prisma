@@ -269,17 +269,20 @@ model Conversation {
 }
 
 model Message {
-  id             String      @id @default(cuid())
-  conversationId String
-  role           MessageRole
-  content        String
-  toolCallId     String?
-  metadata       String      @default("{}") // delivery/read status, channel ids
-  createdAt      DateTime    @default(now())
+  id              String      @id @default(cuid())
+  conversationId  String
+  role            MessageRole
+  content         String
+  toolCallId      String?
+  metadata        String      @default("{}") // delivery/read status, channel ids
+  // Client-supplied per-send id used for idempotent ingestion (web chat / WhatsApp).
+  clientMessageId String?
+  createdAt       DateTime    @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id])
   toolCall     ToolCall?    @relation(fields: [toolCallId], references: [id])
 
+  @@unique([conversationId, clientMessageId])
   @@index([conversationId, createdAt])
 }
 

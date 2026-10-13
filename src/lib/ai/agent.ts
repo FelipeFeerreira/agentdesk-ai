@@ -25,6 +25,8 @@ export interface AgentMessageInput {
   conversationId: string;
   channel: Channel;
   message: string;
+  /** Per-send id for idempotent ingestion (persisted on the customer message). */
+  clientMessageId?: string;
 }
 
 export interface AgentResult {
@@ -69,6 +71,7 @@ export async function handleCustomerMessage(
       conversationId: input.conversationId,
       role: "CUSTOMER",
       content: input.message,
+      clientMessageId: input.clientMessageId,
       metadata: JSON.stringify({ channel: input.channel }),
     },
   });
@@ -308,11 +311,18 @@ async function runSupportLoop(
 
       // Refund threshold → escalate rather than continue blindly.
       if (tool.name === "refund_order" && !result.ok && (result.data as { requiresApproval?: boolean })?.requiresApproval) {
+        const d = result.data as {
+          orderNumber?: string;
+          amountCents?: number;
+          thresholdCents?: number;
+        };
         const esc = await createEscalation(
           input.orgId,
           input.conversationId,
           "Refund amount exceeds approval threshold",
-          `Customer requested a refund above the configured approval threshold.`,
+          `Customer requested a refund of $${((d.amountCents ?? 0) / 100).toFixed(2)} for order ${d.orderNumber ?? "?"}, which exceeds the approval threshold.`,
+          // Tie the approval to the exact pending action + amount.
+          { action: "refund", orderNumber: d.orderNumber, amountCents: d.amountCents },
         );
         escalated = true;
         escalationId = esc.id;
@@ -415,9 +425,17 @@ async function createEscalation(
   conversationId: string,
   reason: string,
   summary: string,
+  proposedAction?: Record<string, unknown>,
 ) {
   const escalation = await prisma.escalation.create({
-    data: { orgId, conversationId, reason, aiSummary: summary, status: "OPEN" },
+    data: {
+      orgId,
+      conversationId,
+      reason,
+      aiSummary: summary,
+      status: "OPEN",
+      proposedAction: proposedAction ? JSON.stringify(proposedAction) : null,
+    },
   });
   // Emit the automation event; n8n owns ticket + notification side effects.
   await enqueueJob({

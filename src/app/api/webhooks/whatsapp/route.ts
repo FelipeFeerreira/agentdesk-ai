@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       channel: "WHATSAPP",
       channelUserId: msg.from,
       content: msg.text,
-      idempotencyKey: `wa:${msg.id}`,
+      clientMessageId: `wa:${msg.id}`,
       phone: msg.from,
     });
 
