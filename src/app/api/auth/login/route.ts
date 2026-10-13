@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { verifyPassword } from "@/lib/auth/password";
 import { createSessionToken, setSessionCookie } from "@/lib/auth/session";
+import { rateLimit, clientKey } from "@/lib/security/rate-limit";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -22,6 +23,15 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: "Enter a valid email and password." },
       { status: 400 },
+    );
+  }
+
+  // Brute-force protection per IP + account.
+  const limit = rateLimit(clientKey(request, "login", parsed.data.email.toLowerCase()), 10, 60_000);
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: "Too many attempts. Please try again shortly." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil((limit.resetAt - Date.now()) / 1000)) } },
     );
   }
 
