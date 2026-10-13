@@ -22,11 +22,11 @@ export default async function OverviewPage() {
 
   const cards = [
     { label: "Conversations today", value: String(metrics.conversationsToday), hint: `${metrics.totalConversations} total` },
-    { label: "AI resolution rate", value: `${metrics.aiResolutionRate}%`, hint: "of conversations resolved" },
+    { label: "Resolution rate", value: `${metrics.aiResolutionRate}%`, hint: "resolved (AI or human)" },
     { label: "Needs human review", value: String(metrics.needsReview), hint: `${metrics.humanEscalations} open escalations` },
-    { label: "Qualified leads", value: String(metrics.qualifiedLeads), hint: "scored & synced" },
+    { label: "Qualified leads", value: String(metrics.qualifiedLeads), hint: "qualified by scoring" },
     { label: "Open tickets", value: String(metrics.openTickets), hint: "awaiting action" },
-    { label: "Failed workflows", value: String(metrics.failedWorkflows), hint: "in dead letter" },
+    { label: "Failed workflows", value: String(metrics.failedWorkflows), hint: "failed or dead-letter" },
     { label: "Avg. tool latency", value: `${metrics.averageResponseMs}ms`, hint: "across tool calls" },
     { label: "Est. AI cost (demo)", value: `$${metrics.estimatedCostUsd}`, hint: "explicit estimate" },
   ];

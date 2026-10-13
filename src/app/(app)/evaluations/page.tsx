@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { RunEvalButton } from "./run-eval-button";
 import Link from "next/link";
+import { evalCases } from "@/lib/eval/cases";
 import type { EvalRunMetrics } from "@/lib/eval/evaluator";
 
 export default async function EvaluationsPage() {
@@ -31,7 +32,7 @@ export default async function EvaluationsPage() {
             <h3 className="text-sm font-semibold text-ink-900">No evaluations yet</h3>
             <p className="mt-1 max-w-sm text-sm text-ink-500">
               Run the evaluation suite to measure intent accuracy, tool selection and escalation
-              correctness across {runs.length} predefined scenarios.
+              correctness across {evalCases.length} predefined scenarios.
             </p>
           </div>
         </Card>
