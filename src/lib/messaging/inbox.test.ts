@@ -86,3 +86,81 @@ describe("conversation state machine", () => {
     expect(after?.status).toBe("HUMAN_ACTIVE");
   });
 });
+
+describe("receipt identity (exact association)", () => {
+  it("treats the same send id with different content as a conflict", async () => {
+    const first = await handleIncomingMessage({
+      orgId,
+      channel: "WEB",
+      channelUserId: "conflict-visitor",
+      content: "What is your refund policy?",
+      clientMessageId: "conflict-1",
+    });
+    expect(first.conflict).toBe(false);
+
+    const second = await handleIncomingMessage({
+      orgId,
+      channel: "WEB",
+      channelUserId: "conflict-visitor",
+      content: "a completely different message",
+      clientMessageId: "conflict-1",
+    });
+    expect(second.conflict).toBe(true);
+  });
+
+  it("replays the stored reply after the conversation was resolved, creating no new conversation", async () => {
+    const visitor = "resolved-replay-visitor";
+    const first = await handleIncomingMessage({
+      orgId,
+      channel: "WEB",
+      channelUserId: visitor,
+      content: "What is your refund policy?",
+      clientMessageId: "resolved-1",
+    });
+    expect(first.conversationId).toBeTruthy();
+    const conversationId = first.conversationId!;
+
+    await prisma.conversation.update({ where: { id: conversationId }, data: { status: "RESOLVED" } });
+    const before = await prisma.conversation.count({
+      where: { orgId, channel: "WEB", customer: { externalId: visitor } },
+    });
+
+    const replay = await handleIncomingMessage({
+      orgId,
+      channel: "WEB",
+      channelUserId: visitor,
+      content: "What is your refund policy?",
+      clientMessageId: "resolved-1",
+    });
+
+    expect(replay.duplicate).toBe(true);
+    expect(replay.conversationId).toBe(conversationId);
+    expect(replay.result?.assistantContent).toBe(first.result?.assistantContent);
+
+    const after = await prisma.conversation.count({
+      where: { orgId, channel: "WEB", customer: { externalId: visitor } },
+    });
+    expect(after).toBe(before);
+  });
+
+  it("processes a concurrent duplicate exactly once", async () => {
+    const args = {
+      orgId,
+      channel: "WEB" as const,
+      channelUserId: "concurrent-visitor",
+      content: "What is your refund policy?",
+      clientMessageId: "concurrent-1",
+    };
+    const [a, b] = await Promise.all([handleIncomingMessage(args), handleIncomingMessage(args)]);
+
+    const processed = [a, b].filter((r) => !r.duplicate && !r.inProgress && !r.conflict);
+    expect(processed.length).toBe(1);
+
+    const receipt = `${orgId}:WEB:concurrent-visitor:concurrent-1`;
+    const rows = await prisma.message.findMany({ where: { clientMessageId: receipt } });
+    expect(rows.length).toBe(1);
+
+    const customers = await prisma.customer.findMany({ where: { orgId, externalId: "concurrent-visitor" } });
+    expect(customers.length).toBe(1);
+  });
+});

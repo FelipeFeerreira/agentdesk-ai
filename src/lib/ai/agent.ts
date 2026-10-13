@@ -6,7 +6,7 @@ import type {
 } from "@prisma/client";
 import { getLLMProvider } from "./providers";
 import { getTool } from "./tools";
-import type { ToolContext, ToolDefinition, ToolResult } from "./types";
+import type { ToolContext, ToolDefinition, ToolResult, LLMProvider } from "./types";
 import type { RetrievedSource, Intent } from "./types";
 import {
   ensureLead,
@@ -25,8 +25,8 @@ export interface AgentMessageInput {
   conversationId: string;
   channel: Channel;
   message: string;
-  /** Per-send id for idempotent ingestion (persisted on the customer message). */
-  clientMessageId?: string;
+  /** When true the caller already persisted the customer message. */
+  alreadyPersisted?: boolean;
 }
 
 export interface AgentResult {
@@ -55,7 +55,6 @@ export async function handleCustomerMessage(
   input: AgentMessageInput,
 ): Promise<AgentResult> {
   const started = Date.now();
-  const provider = getLLMProvider();
 
   // Load context.
   const organization = await prisma.organization.findUniqueOrThrow({
@@ -65,21 +64,31 @@ export async function handleCustomerMessage(
     where: { id: input.customerId },
   });
 
-  // Persist the incoming customer message.
-  await prisma.message.create({
-    data: {
-      conversationId: input.conversationId,
-      role: "CUSTOMER",
-      content: input.message,
-      clientMessageId: input.clientMessageId,
-      metadata: JSON.stringify({ channel: input.channel }),
-    },
-  });
+  // Persist the incoming customer message (unless the caller already did, e.g.
+  // the idempotent inbox which owns the receipt).
+  if (!input.alreadyPersisted) {
+    await prisma.message.create({
+      data: {
+        conversationId: input.conversationId,
+        role: "CUSTOMER",
+        content: input.message,
+        metadata: JSON.stringify({ channel: input.channel }),
+      },
+    });
+  }
 
   const history = await loadHistory(input.conversationId);
 
-  // 1) Classify intent. A live provider outage must not crash the conversation —
-  //    it degrades to a graceful human escalation instead.
+  // 1) Resolve the provider and classify intent. A misconfigured or failing
+  //    provider must not crash the conversation — it degrades to a human
+  //    escalation with an explicit reason.
+  let provider: LLMProvider;
+  try {
+    provider = getLLMProvider();
+  } catch (e) {
+    return providerFailureResult(input, "AI provider is not configured", e);
+  }
+
   let intentResult: BaseContext["intent"];
   try {
     intentResult = await provider.classifyIntent(

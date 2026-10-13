@@ -220,21 +220,24 @@ model Customer {
   tickets       Ticket[]
 
   @@unique([orgId, email])
+  @@unique([orgId, externalId])
+  @@unique([orgId, whatsappId])
   @@index([orgId])
 }
 
 model Order {
-  id          String   @id @default(cuid())
-  orgId       String
-  customerId  String
-  orderNumber String
-  status      String // e.g. PROCESSING, SHIPPED, DELIVERED, REFUNDED
-  totalCents  Int
-  currency    String   @default("USD")
-  placedAt    DateTime
-  items       String   @default("[]") // JSON
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(cuid())
+  orgId         String
+  customerId    String
+  orderNumber   String
+  status        String // e.g. PROCESSING, SHIPPED, DELIVERED, REFUNDED
+  totalCents    Int
+  refundedCents Int      @default(0) // accumulated refunds (partial refunds supported)
+  currency      String   @default("USD")
+  placedAt      DateTime
+  items         String   @default("[]") // JSON
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   org      Organization @relation(fields: [orgId], references: [id])
   customer Customer     @relation(fields: [customerId], references: [id])
@@ -273,13 +276,21 @@ model Conversation {
 }
 
 model Message {
-  id             String      @id @default(cuid())
-  conversationId String
-  role           MessageRole
-  content        String
-  toolCallId     String?
-  metadata       String      @default("{}") // delivery/read status, channel ids
-  createdAt      DateTime    @default(now())
+  id              String      @id @default(cuid())
+  conversationId  String
+  role            MessageRole
+  content         String
+  toolCallId      String?
+  metadata        String      @default("{}") // delivery/read status, channel ids, contentHash
+  // Stable receipt key: `${orgId}:${channel}:${senderRef}:${messageId}`. Globally
+  // unique so a replay is detected BEFORE any conversation is created, and a
+  // replayed payload can never be reprocessed.
+  clientMessageId String?     @unique
+  // Inbound processing state for customer messages: PENDING | COMPLETED | FAILED.
+  inboundStatus   String?
+  // The reply produced for this inbound message (explicit association, no timing guesswork).
+  replyMessageId  String?
+  createdAt       DateTime    @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id])
   toolCall     ToolCall?    @relation(fields: [toolCallId], references: [id])

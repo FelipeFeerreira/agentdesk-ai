@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import type { Channel } from "@prisma/client";
 import { handleCustomerMessage } from "@/lib/ai/agent";
@@ -6,27 +7,36 @@ import type { AgentResult } from "@/lib/ai/agent";
 export interface IncomingMessage {
   orgId: string;
   channel: Channel;
-  /** Stable identifier of the sender on that channel (phone number, visitor id). */
+  /** Stable sender identifier on the channel (phone number, visitor ref). */
   channelUserId: string;
   content: string;
   /**
-   * Per-send id supplied by the client/channel (web chat send id, WhatsApp
-   * message id). Used for idempotent ingestion — a replay returns the exact
-   * same stored reply instead of re-running the agent.
+   * The channel/consumer message id (WhatsApp message id, web send id). Combined
+   * with org + channel + sender it forms the stable receipt key.
    */
   clientMessageId?: string;
-  /** Optional customer metadata to attach when creating a new customer. */
   name?: string;
   email?: string;
   phone?: string;
 }
 
 export interface IncomingResult {
-  /** True when the same clientMessageId had already been processed. */
+  /** The same receipt was already completed → the stored reply is returned. */
   duplicate: boolean;
-  conversationId: string;
-  /** null when no AI reply was produced (e.g. a human owns the conversation). */
+  /** The same receipt key was seen with different content → caller should 409. */
+  conflict: boolean;
+  /** The same receipt is currently being processed (concurrent duplicate). */
+  inProgress: boolean;
+  conversationId: string | null;
   result: AgentResult | null;
+}
+
+function contentHash(text: string): string {
+  return createHash("sha256").update(text.replace(/\s+/g, " ").trim()).digest("hex");
+}
+
+function receiptKey(orgId: string, channel: Channel, senderRef: string, messageId: string): string {
+  return `${orgId}:${channel}:${senderRef}:${messageId}`;
 }
 
 function replayResult(content: string): AgentResult {
@@ -42,127 +52,168 @@ function replayResult(content: string): AgentResult {
   };
 }
 
-function isUniqueViolation(e: unknown): boolean {
-  return typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002";
+function parseMeta(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
 }
 
-async function findReplyAfter(
-  conversationId: string,
-  existing: { id: string; createdAt: Date },
-) {
-  return prisma.message.findFirst({
-    where: {
-      conversationId,
-      id: { not: existing.id },
-      role: { in: ["ASSISTANT", "HUMAN"] },
-      createdAt: { gte: existing.createdAt },
-    },
-    orderBy: { createdAt: "asc" },
-  });
+function isUniqueViolation(e: unknown): boolean {
+  return typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002";
 }
 
 /**
  * Unified message ingestion shared by Web Chat and WhatsApp.
  *
- * Responsibilities:
- *  - resolve the customer and the open conversation
- *  - idempotent ingestion keyed on the per-send id (atomic via a unique index)
- *  - conversation state machine: the AI only runs while the conversation is
- *    AI_ACTIVE; while a human owns it (or it awaits review) the message is
- *    still recorded but never answered by the model.
+ * Idempotency is keyed on a stable receipt (`org:channel:sender:messageId`)
+ * checked BEFORE any conversation is resolved, so:
+ *  - a replay never creates a new conversation, even after the original was resolved;
+ *  - the same receipt with different content is a conflict (never reprocessed);
+ *  - a completed receipt returns the exact reply stored for it (explicit link).
+ *
+ * The conversation state machine applies after receipt resolution: the AI only
+ * answers AI_ACTIVE conversations; otherwise the message is recorded for a human.
  */
 export async function handleIncomingMessage(
   input: IncomingMessage,
 ): Promise<IncomingResult> {
-  // 1) Resolve or create the customer.
-  let customer = await prisma.customer.findFirst({
-    where:
-      input.channel === "WHATSAPP"
-        ? { orgId: input.orgId, whatsappId: input.channelUserId }
-        : { orgId: input.orgId, externalId: input.channelUserId },
-  });
-  if (!customer) {
-    customer = await prisma.customer.create({
-      data: {
-        orgId: input.orgId,
-        ...(input.channel === "WHATSAPP"
-          ? { whatsappId: input.channelUserId, phone: input.channelUserId }
-          : { externalId: input.channelUserId }),
-        name: input.name ?? "Web visitor",
-        email: input.email,
-      },
-    });
+  const hash = contentHash(input.content);
+  const key = input.clientMessageId
+    ? receiptKey(input.orgId, input.channel, input.channelUserId, input.clientMessageId)
+    : null;
+
+  // 1) Receipt resolution (no conversation required).
+  let retryConversationId: string | null = null;
+  if (key) {
+    const existing = await prisma.message.findFirst({ where: { clientMessageId: key } });
+    if (existing) {
+      const meta = parseMeta(existing.metadata);
+      if (typeof meta.contentHash === "string" && meta.contentHash !== hash) {
+        return { duplicate: false, conflict: true, inProgress: false, conversationId: existing.conversationId, result: null };
+      }
+      if (existing.inboundStatus === "PENDING") {
+        return { duplicate: true, conflict: false, inProgress: true, conversationId: existing.conversationId, result: null };
+      }
+      if (existing.inboundStatus === "FAILED") {
+        // Recoverable: reuse the row and retry below.
+        retryConversationId = existing.conversationId;
+      } else {
+        const reply = existing.replyMessageId
+          ? await prisma.message.findUnique({ where: { id: existing.replyMessageId } })
+          : null;
+        return {
+          duplicate: true,
+          conflict: false,
+          inProgress: false,
+          conversationId: existing.conversationId,
+          result: reply ? replayResult(reply.content) : null,
+        };
+      }
+    }
   }
 
-  // 2) Resolve or create an open conversation.
-  let conversation = await prisma.conversation.findFirst({
-    where: {
-      orgId: input.orgId,
-      customerId: customer.id,
-      channel: input.channel,
-      status: { notIn: ["RESOLVED"] },
-    },
-    orderBy: { updatedAt: "desc" },
-  });
+  // 2) Resolve or create the customer atomically (unique identity per org+channel).
+  const customer =
+    input.channel === "WHATSAPP"
+      ? await prisma.customer.upsert({
+          where: { orgId_whatsappId: { orgId: input.orgId, whatsappId: input.channelUserId } },
+          update: {},
+          create: { orgId: input.orgId, whatsappId: input.channelUserId, phone: input.channelUserId, name: "WhatsApp customer" },
+        })
+      : await prisma.customer.upsert({
+          where: { orgId_externalId: { orgId: input.orgId, externalId: input.channelUserId } },
+          update: {},
+          create: { orgId: input.orgId, externalId: input.channelUserId, name: input.name ?? "Web visitor", email: input.email },
+        });
+
+  // 3) Resolve or create an open conversation (or reuse the retried receipt's).
+  let conversation = retryConversationId
+    ? await prisma.conversation.findUnique({ where: { id: retryConversationId } })
+    : await prisma.conversation.findFirst({
+        where: {
+          orgId: input.orgId,
+          customerId: customer.id,
+          channel: input.channel,
+          status: { notIn: ["RESOLVED"] },
+        },
+        orderBy: { updatedAt: "desc" },
+      });
   if (!conversation) {
     conversation = await prisma.conversation.create({
       data: { orgId: input.orgId, customerId: customer.id, channel: input.channel, status: "AI_ACTIVE" },
     });
   }
+  const conversationId = conversation.id;
 
-  // 3) Idempotency: a replay of the same send returns the stored reply.
-  if (input.clientMessageId) {
-    const existing = await prisma.message.findFirst({
-      where: { conversationId: conversation.id, clientMessageId: input.clientMessageId },
-    });
-    if (existing) {
-      const reply = await findReplyAfter(conversation.id, existing);
-      return {
-        duplicate: true,
-        conversationId: conversation.id,
-        result: reply ? replayResult(reply.content) : null,
-      };
+  // 4) Persist the inbound message with its receipt + PENDING state.
+  const metadata = JSON.stringify({ channel: input.channel, contentHash: hash });
+  let inboundMessageId: string;
+  try {
+    if (key && retryConversationId) {
+      const existing = await prisma.message.findFirst({ where: { clientMessageId: key } });
+      inboundMessageId = existing!.id;
+      await prisma.message.update({
+        where: { id: inboundMessageId },
+        data: { inboundStatus: "PENDING", replyMessageId: null },
+      });
+    } else {
+      const created = await prisma.message.create({
+        data: {
+          conversationId,
+          role: "CUSTOMER",
+          content: input.content,
+          clientMessageId: key,
+          inboundStatus: "PENDING",
+          metadata,
+        },
+      });
+      inboundMessageId = created.id;
     }
+  } catch (e) {
+    if (isUniqueViolation(e) && key) {
+      // Concurrent duplicate raced past the check — re-resolve the receipt.
+      const existing = await prisma.message.findFirst({ where: { clientMessageId: key } });
+      if (existing?.inboundStatus === "COMPLETED" && existing.replyMessageId) {
+        const reply = await prisma.message.findUnique({ where: { id: existing.replyMessageId } });
+        return { duplicate: true, conflict: false, inProgress: false, conversationId: existing.conversationId, result: reply ? replayResult(reply.content) : null };
+      }
+      return { duplicate: true, conflict: false, inProgress: true, conversationId: existing?.conversationId ?? conversationId, result: null };
+    }
+    throw e;
   }
 
-  // 4) State machine: the AI only answers conversations it owns.
+  // 5) State machine: only AI_ACTIVE conversations are answered by the model.
   if (conversation.status !== "AI_ACTIVE") {
-    await prisma.message.create({
-      data: {
-        conversationId: conversation.id,
-        role: "CUSTOMER",
-        content: input.content,
-        clientMessageId: input.clientMessageId,
-        metadata: JSON.stringify({ channel: input.channel }),
-      },
+    await prisma.message.update({
+      where: { id: inboundMessageId },
+      data: { inboundStatus: "COMPLETED" },
     });
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { updatedAt: new Date() },
-    });
-    return { duplicate: false, conversationId: conversation.id, result: null };
+    await prisma.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
+    return { duplicate: false, conflict: false, inProgress: false, conversationId, result: null };
   }
 
-  // 5) Run the agent (it persists the customer message with the send id).
+  // 6) Run the agent (the inbound message is already persisted).
   try {
     const result = await handleCustomerMessage({
       orgId: input.orgId,
       customerId: customer.id,
-      conversationId: conversation.id,
+      conversationId,
       channel: input.channel,
       message: input.content,
-      clientMessageId: input.clientMessageId,
+      alreadyPersisted: true,
     });
-    return { duplicate: false, conversationId: conversation.id, result };
+    await prisma.message.update({
+      where: { id: inboundMessageId },
+      data: { inboundStatus: "COMPLETED", replyMessageId: result.assistantMessageId },
+    });
+    return { duplicate: false, conflict: false, inProgress: false, conversationId, result };
   } catch (e) {
-    // Concurrent duplicate that raced past the pre-check: replay the stored reply.
-    if (isUniqueViolation(e) && input.clientMessageId) {
-      const existing = await prisma.message.findFirst({
-        where: { conversationId: conversation.id, clientMessageId: input.clientMessageId },
-      });
-      const reply = existing ? await findReplyAfter(conversation.id, existing) : null;
-      return { duplicate: true, conversationId: conversation.id, result: reply ? replayResult(reply.content) : null };
-    }
+    await prisma.message.update({
+      where: { id: inboundMessageId },
+      data: { inboundStatus: "FAILED", metadata: JSON.stringify({ channel: input.channel, contentHash: hash, error: e instanceof Error ? e.message : "unknown" }) },
+    });
     throw e;
   }
 }

@@ -15,16 +15,18 @@ const schema = z.object({
 
 const RATE_LIMIT = 20; // requests
 const RATE_WINDOW_MS = 60_000;
+const MAX_BODY_BYTES = 20_000;
 
 export async function POST(request: Request) {
-  const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (contentLength > 20_000) {
+  // Enforce a real byte limit regardless of Content-Length.
+  const raw = await request.text();
+  if (Buffer.byteLength(raw, "utf8") > MAX_BODY_BYTES) {
     return NextResponse.json({ error: "Payload too large." }, { status: 413 });
   }
 
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: "Invalid body." }, { status: 400 });
   }
@@ -58,11 +60,19 @@ export async function POST(request: Request) {
       clientMessageId: parsed.data.clientMessageId,
     });
 
+    // Same send id with different content is a conflict, not a replay.
+    if (result.conflict) {
+      return NextResponse.json({ error: "This send id was already used with different content." }, { status: 409 });
+    }
+    if (result.inProgress) {
+      return NextResponse.json({ error: "This message is already being processed." }, { status: 409 });
+    }
+
     if (!result.duplicate) {
       await audit(org.id, {
         event: "webchat.message",
         integration: "CORE",
-        conversationId: result.conversationId,
+        conversationId: result.conversationId ?? undefined,
         status: "SUCCESS",
         durationMs: Date.now() - started,
       });

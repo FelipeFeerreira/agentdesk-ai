@@ -8,6 +8,7 @@
  *
  * `openai` provider: text-embedding-3-small via the OpenAI API.
  */
+import { isDemoMode } from "@/lib/security/mode";
 
 const DIM = 384;
 
@@ -120,10 +121,16 @@ export class OpenAIEmbedder implements Embedder {
 }
 
 export function getEmbedder(): Embedder {
-  const demoMode = (process.env.DEMO_MODE ?? "true") !== "false";
   const provider = process.env.EMBEDDING_PROVIDER ?? "demo";
-  if (!demoMode && provider === "openai" && process.env.OPENAI_API_KEY) {
-    return new OpenAIEmbedder();
+  if (provider === "openai") {
+    // In connected mode an explicitly-requested OpenAI embedder must be configured.
+    if (process.env.OPENAI_API_KEY) return new OpenAIEmbedder();
+    if (!isDemoMode()) {
+      throw new Error(
+        "EMBEDDING_PROVIDER=openai requires OPENAI_API_KEY in connected mode.",
+      );
+    }
+    return new DemoEmbedder();
   }
   return new DemoEmbedder();
 }

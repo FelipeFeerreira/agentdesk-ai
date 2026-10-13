@@ -1,20 +1,27 @@
 import { DemoCRMProvider } from "./demo";
 import { HubSpotProvider } from "./hubspot";
 import type { CRMProvider } from "./provider";
+import { isDemoMode } from "@/lib/security/mode";
 
 let cached: CRMProvider | null = null;
 
 /**
- * Returns the active CRM provider. Uses HubSpot only when DEMO_MODE is off and
- * credentials are present; otherwise the clearly-labelled demo provider.
- * Respecting DEMO_MODE here guarantees demo mode never makes live CRM calls.
+ * Returns the active CRM provider.
+ *  - demo mode → labelled DemoCRMProvider (no external calls);
+ *  - connected mode → HubSpotProvider (requires HUBSPOT_ACCESS_TOKEN);
+ *  - connected mode without a token → explicit error (no silent demo fallback).
  */
 export function getCRMProvider(): CRMProvider {
   if (cached) return cached;
-  const demoMode = (process.env.DEMO_MODE ?? "true") !== "false";
-  cached = !demoMode && process.env.HUBSPOT_ACCESS_TOKEN
-    ? new HubSpotProvider()
-    : new DemoCRMProvider();
+  if (isDemoMode()) {
+    cached = new DemoCRMProvider();
+  } else if (process.env.HUBSPOT_ACCESS_TOKEN) {
+    cached = new HubSpotProvider();
+  } else {
+    throw new Error(
+      "Connected mode (DEMO_MODE=false) requires HUBSPOT_ACCESS_TOKEN. Set it, or run with DEMO_MODE=true.",
+    );
+  }
   return cached;
 }
 
