@@ -4,28 +4,74 @@
 
 AgentDesk AI combines an AI agent with real tool calling, RAG knowledge retrieval, CRM sync, human-in-the-loop escalation, n8n automation, WhatsApp/web channels, background jobs and observability.
 
+> All screenshots below are **real captures** of the running application with seeded, non-sensitive demo data (see `docs/screenshots/`). The demo requires **no API keys**.
+
+## Product walkthrough
+
+| Operations dashboard | Customer web chat (grounded answer) |
+| --- | --- |
+| ![AgentDesk AI operations dashboard](docs/screenshots/dashboard-overview-desktop.png) | ![AgentDesk AI web chat grounded answer](docs/screenshots/chat-grounded-answer-desktop.png) |
+
+| Conversation detail (tool trace) | Human escalation |
+| --- | --- |
+| ![Conversation detail with tool calls](docs/screenshots/conversation-detail-desktop.png) | ![Refund escalation above threshold](docs/screenshots/chat-escalation-desktop.png) |
+
+| Lead pipeline | Evaluations |
+| --- | --- |
+| ![Lead pipeline](docs/screenshots/leads-desktop.png) | ![AI evaluations](docs/screenshots/evaluations-desktop.png) |
+
+| Mobile dashboard | Landing page |
+| --- | --- |
+| ![Mobile dashboard](docs/screenshots/dashboard-overview-mobile.png) | ![Landing page](docs/screenshots/landing-desktop.png) |
+
+**See it work (60 seconds):**
+1. Open the web chat and send: *"Where is order #4582?"* → the agent calls `get_order_status` and replies with real order data.
+2. Ask: *"What is your refund policy?"* → the agent answers from the knowledge base with a source citation.
+3. Send: *"I need a $500 refund for order #4701."* → the refund exceeds the approval threshold, so it **escalates to a human**.
+4. Sign in and open **Conversations** → inspect the tool trace, sources and audit history for each step.
+
+> The demo uses fictional data. Live OpenAI, HubSpot, WhatsApp, n8n and PostgreSQL/pgvector integrations require separate credentials/configuration and are **not** exercised by the default demo.
+
 ---
 
 ## Table of contents
 
 1. [Product overview](#product-overview)
-2. [Features](#features)
-3. [Architecture](#architecture)
-4. [AI Agent architecture](#ai-agent-architecture)
-5. [Tool calling](#tool-calling)
-6. [RAG architecture](#rag-architecture)
-7. [n8n workflows](#n8n-workflows)
-8. [CRM integration](#crm-integration)
-9. [WhatsApp integration](#whatsapp-integration)
-10. [Reliability design](#reliability-design)
-11. [AI evaluations](#ai-evaluations)
-12. [Local installation](#local-installation)
-13. [Environment variables](#environment-variables)
-14. [Demo instructions](#demo-instructions)
-15. [Testing](#testing)
-16. [Deployment](#deployment)
-17. [Known limitations](#known-limitations)
-18. [Future roadmap](#future-roadmap)
+2. [Verification](#verification)
+3. [Features](#features)
+4. [Architecture](#architecture)
+5. [AI Agent architecture](#ai-agent-architecture)
+6. [Tool calling](#tool-calling)
+7. [RAG architecture](#rag-architecture)
+8. [n8n workflows](#n8n-workflows)
+9. [CRM integration](#crm-integration)
+10. [WhatsApp integration](#whatsapp-integration)
+11. [Reliability design](#reliability-design)
+12. [AI evaluations](#ai-evaluations)
+13. [Local installation](#local-installation)
+14. [Environment variables](#environment-variables)
+15. [Demo instructions](#demo-instructions)
+16. [Testing](#testing)
+17. [Deployment](#deployment)
+18. [Known limitations](#known-limitations)
+19. [Future roadmap](#future-roadmap)
+
+---
+
+## Verification
+
+Results below were produced locally against the seeded SQLite demo. Run the same commands to reproduce.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Lint | `npm run lint` | ✅ pass (0 errors) |
+| Types | `npm run typecheck` | ✅ pass |
+| Unit / integration | `npm run test` | ✅ 84 passed (12 files) |
+| Production build | `npm run build` | ✅ pass |
+| End-to-end | `npm run e2e` | ✅ 3 passed (login, hero flow, escalation) |
+| Screenshots | `npm run screenshots` | ✅ 17 real captures in `docs/screenshots/` |
+
+Live-model evaluation (`DEMO_MODE=false` + `OPENAI_API_KEY`) and live HubSpot/WhatsApp/n8n/PostgreSQL verification are **not** run here — they require external credentials and are documented in [`docs/`](docs/).
 
 ---
 
