@@ -1,23 +1,30 @@
-import { rmSync, existsSync } from "node:fs";
+import { rmSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
 /**
- * Prepares an isolated SQLite database for the test run.
+ * Prepares an EXCLUSIVE SQLite database for this test run.
  *
- * Guarantees:
- *  - uses a dedicated file (prisma/test.db), never the development database;
- *  - deletes any previous test DB (+ journal/WAL) first, so a locked or
- *    half-written file can never cause a "Schema engine error";
- *  - invokes the local Prisma binary directly (no `npx` resolution/network).
- *
- * Because the same fixed path is reused, concurrent runs in the same working
- * directory are not supported — CI and local runs are serialised by design.
+ *  - unique file name per invocation → two concurrent runs never delete or
+ *    share each other's database;
+ *  - never touches the development database;
+ *  - the resolved URL is propagated to workers both via `process.env` and a
+ *    per-run pointer file (belt and braces for pool isolation);
+ *  - uses the local Prisma binary (no npx/network).
  */
+const TEST_DIR = resolve("prisma/.test-dbs");
+const POINTER = resolve(TEST_DIR, "current.json");
+
 export default function globalSetup() {
-  const testDb = resolve("prisma/test.db");
+  mkdirSync(TEST_DIR, { recursive: true });
+
+  const runId = `${process.pid}-${Date.now()}`;
+  const fileName = `test-${runId}.db`;
+  const url = `file:./.test-dbs/${fileName}`; // relative to the Prisma schema dir
+  const absPath = resolve(TEST_DIR, fileName);
+
   for (const suffix of ["", "-journal", "-wal", "-shm"]) {
-    const file = `${testDb}${suffix}`;
+    const file = `${absPath}${suffix}`;
     if (existsSync(file)) rmSync(file, { force: true });
   }
 
@@ -30,16 +37,26 @@ export default function globalSetup() {
     execFileSync(
       process.execPath,
       [prismaBin, "db", "push", "--skip-generate", "--accept-data-loss"],
-      {
-        env: { ...process.env, DATABASE_URL: "file:./test.db" },
-        stdio: "inherit",
-      },
+      { env: { ...process.env, DATABASE_URL: url }, stdio: "inherit" },
     );
   } catch (e) {
     throw new Error(
-      `Failed to prepare the test database at ${testDb}. ` +
-        `Ensure the @prisma/client is generated (npx prisma generate) and the directory is writable.\n` +
+      `Failed to prepare the test database (${url}). ` +
+        `Ensure @prisma/client is generated (npx prisma generate) and ${TEST_DIR} is writable.\n` +
         `${e instanceof Error ? e.message : String(e)}`,
     );
   }
+
+  // Propagate to workers (env is inherited by forked workers; the pointer file
+  // is the fallback read by vitest.setup.ts).
+  process.env.DATABASE_URL = url;
+  writeFileSync(POINTER, JSON.stringify({ url, file: absPath, at: new Date().toISOString() }));
+
+  return () => {
+    for (const suffix of ["", "-journal", "-wal", "-shm"]) {
+      const file = `${absPath}${suffix}`;
+      if (existsSync(file)) rmSync(file, { force: true });
+    }
+    if (existsSync(POINTER)) rmSync(POINTER, { force: true });
+  };
 }

@@ -11,9 +11,6 @@ export default defineConfig({
     fileParallelism: false,
     setupFiles: ["./vitest.setup.ts"],
     globalSetup: ["./vitest.global-setup.ts"],
-    env: {
-      DATABASE_URL: "file:./test.db",
-    },
     include: ["src/**/*.test.{ts,tsx}"],
   },
   resolve: {
