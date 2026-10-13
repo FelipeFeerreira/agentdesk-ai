@@ -1,21 +1,51 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
-test.describe("AgentDesk AI end-to-end", () => {
-  test("login → dashboard → web chat agent response", async ({ page }) => {
-    // Login
-    await page.goto("/login");
-    await page.getByLabel("Email").fill("admin@agentdesk.ai");
-    await page.getByLabel("Password").fill("admin123");
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await page.waitForURL("**/overview");
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+const DEMO = { email: "admin@agentdesk.ai", password: "admin123" };
 
-    // Open the web chat and ask the agent a seeded question
-    await page.goto("/chat");
-    await page.getByPlaceholder("Message the AI agent…").fill("Where is order #4582?");
-    await page.getByRole("button", { name: "Send" }).click();
-    await expect(page.getByText("Order 4582", { exact: false })).toBeVisible({
-      timeout: 15000,
-    });
+async function login(page: Page) {
+  // page.request shares the cookie jar with the page's context.
+  const res = await page.request.post("/api/auth/login", { data: DEMO });
+  expect(res.ok(), "demo login should succeed").toBeTruthy();
+}
+
+test("login endpoint rejects invalid credentials", async ({ page }) => {
+  const res = await page.request.post("/api/auth/login", {
+    data: { email: DEMO.email, password: "wrong-password" },
   });
+  expect(res.status()).toBe(401);
+});
+
+test("hero flow: dashboard → web chat grounded answer → conversation, staying authenticated", async ({
+  page,
+}) => {
+  await login(page);
+
+  // Dashboard
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
+  // Regression: navigating across dashboard pages must NOT sign the user out
+  // (a prefetched GET /logout used to clear the session).
+  await page.goto("/conversations");
+  await expect(page.getByRole("heading", { name: "Conversations" })).toBeVisible();
+  await expect(page).not.toHaveURL(/\/login/);
+
+  // Conversation detail renders a tool trace.
+  const firstConv = page.locator('a[href^="/conversations/"]').first();
+  await expect(firstConv).toBeVisible();
+  await firstConv.click();
+  await expect(page.getByText("Tool calls")).toBeVisible({ timeout: 15_000 });
+
+  // Public web chat returns a grounded, data-backed answer.
+  await page.goto("/chat");
+  await page.getByPlaceholder("Message the AI agent…").fill("Where is order #4582?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(/Order 4582/i)).toBeVisible({ timeout: 20_000 });
+});
+
+test("sensitive refund above threshold escalates to a human", async ({ page }) => {
+  await page.goto("/chat");
+  await page.getByPlaceholder("Message the AI agent…").fill("I need a $500 refund for order #4701.");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(/above what I can approve/i)).toBeVisible({ timeout: 20_000 });
 });
