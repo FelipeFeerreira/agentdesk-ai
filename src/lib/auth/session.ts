@@ -46,11 +46,23 @@ export async function setSessionCookie(token: string): Promise<void> {
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureCookie(),
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
   });
+}
+
+/**
+ * Secure cookies require HTTPS. Default is secure in production, but a local
+ * HTTP demo (e.g. Playwright/CI against `next start` on localhost) can opt out
+ * with SESSION_COOKIE_SECURE=false. Never disable this on a real HTTPS deploy.
+ */
+function isSecureCookie(): boolean {
+  const override = process.env.SESSION_COOKIE_SECURE;
+  if (override === "true") return true;
+  if (override === "false") return false;
+  return process.env.NODE_ENV === "production";
 }
 
 export async function clearSessionCookie(): Promise<void> {
