@@ -217,7 +217,9 @@ export function generateDeterministicResponse(input: AgentStepInput): string {
         const top = sources[0];
         return `${top.content}\n\n— From our ${top.documentTitle}`;
       }
-      return "I couldn't find a confident answer to that in our knowledge base. I've noted it for our team to follow up.";
+      // Honest low-confidence answer — no promise of a follow-up that the
+      // system does not actually create.
+      return "I couldn't find a confident answer to that in our knowledge base. I don't want to guess — you can ask to speak to a human and I'll connect you with the team.";
     }
 
     default:

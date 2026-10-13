@@ -3,17 +3,22 @@ import { scoreLead, leadScoreBreakdown } from "./tools";
 import { extractLeadFields, missingFields } from "./lead";
 
 describe("scoreLead", () => {
-  it("scores a fully-qualified lead highly", () => {
+  it("scores a fully-qualified lead (collected fields only) highly", () => {
     const score = scoreLead({
       email: "alice@example.com",
       company: "Acme",
       companySize: 50,
       problem: "We spend too much time answering support tickets manually.",
-      solution: "We need an AI agent to automate customer support.",
       budgetRange: "$2000/mo",
       timeline: "next month",
     });
     expect(score).toBeGreaterThanOrEqual(6);
+  });
+
+  it("does not score uncollected fields (solution)", () => {
+    // A lead with only a 'solution' (never collected by the flow) scores 0.
+    const withSolution = scoreLead({ solution: "AI customer support" } as never);
+    expect(withSolution).toBe(0);
   });
 
   it("scores an empty lead at zero", () => {

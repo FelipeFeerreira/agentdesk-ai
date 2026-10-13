@@ -3,8 +3,9 @@ import { prisma } from "@/lib/db";
 import { retrieveChunks } from "@/lib/rag/vectorstore";
 import { parseSettings } from "@/lib/settings";
 import { enqueueJob } from "@/lib/automation/jobs";
-import type { ToolDefinition, ToolResult } from "../types";
+import type { ToolContext, ToolDefinition, ToolResult } from "../types";
 import type { LeadStatus } from "@prisma/client";
+import { isDemoMode } from "@/lib/security/mode";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,6 +17,15 @@ function err(message: string): ToolResult {
 
 function ok(data: unknown, citations?: string[]): ToolResult {
   return { ok: true, data, citations };
+}
+
+/**
+ * An order may only be read or refunded by the customer who owns it.
+ * Demo mode intentionally shares the seeded fictional fixtures for the
+ * walkthrough; every connected deployment enforces ownership.
+ */
+function canAccessOrder(order: { customerId: string }, ctx: ToolContext): boolean {
+  return isDemoMode() || order.customerId === ctx.customer.id;
 }
 
 const orderNumberSchema = z.string().trim().min(1).max(64);
@@ -64,7 +74,10 @@ export const tools: ToolDefinition[] = [
         where: { orgId_orderNumber: { orgId: ctx.orgId, orderNumber } },
         include: { customer: true },
       });
-      if (!order) return err(`No order found with number "${orderNumber}".`);
+      // Do not reveal whether another customer's order exists.
+      if (!order || !canAccessOrder(order, ctx)) {
+        return err(`No order found with number "${orderNumber}".`);
+      }
       return ok({
         orderNumber: order.orderNumber,
         status: order.status,
@@ -274,7 +287,22 @@ export const tools: ToolDefinition[] = [
       const order = await prisma.order.findUnique({
         where: { orgId_orderNumber: { orgId: ctx.orgId, orderNumber: a.orderNumber } },
       });
-      if (!order) return err(`No order found with number "${a.orderNumber}".`);
+      // Ownership + existence are indistinguishable to the caller.
+      if (!order || !canAccessOrder(order, ctx)) {
+        return err(`No order found with number "${a.orderNumber}".`);
+      }
+      // Eligibility and amount validation.
+      if (order.status === "REFUNDED") {
+        return err(`Order ${order.orderNumber} has already been refunded.`);
+      }
+      if (order.status === "CANCELLED") {
+        return err(`Order ${order.orderNumber} is cancelled and cannot be refunded.`);
+      }
+      if (a.amountCents > order.totalCents) {
+        return err(
+          `Refund amount exceeds the order total of ${(order.totalCents / 100).toFixed(2)} ${order.currency}.`,
+        );
+      }
 
       const settings = parseSettings(ctx.organization.settings);
       const threshold = settings.business.refundApprovalThresholdUsd * 100;
@@ -285,6 +313,7 @@ export const tools: ToolDefinition[] = [
           error: "Refund exceeds approval threshold.",
           data: {
             requiresApproval: true,
+            action: "refund",
             orderNumber: a.orderNumber,
             amountCents: a.amountCents,
             thresholdCents: threshold,
@@ -300,6 +329,9 @@ export const tools: ToolDefinition[] = [
         orderNumber: a.orderNumber,
         refundedCents: a.amountCents,
         status: "REFUNDED",
+        currency: order.currency,
+        // Demo refunds are simulations — no real payment is issued.
+        simulated: isDemoMode(),
       });
     },
   },
@@ -309,12 +341,16 @@ export const tools: ToolDefinition[] = [
 // Lead scoring (transparent rules)
 // ---------------------------------------------------------------------------
 
+/**
+ * Transparent lead scoring from the fields the qualification flow actually
+ * collects (name, email, company, companySize, problem, budgetRange, timeline).
+ * Max = 7 → QUALIFIED >= 6, NEEDS_MORE_INFO >= 4.
+ */
 export function scoreLead(a: {
   companySize?: number;
   email?: string;
   company?: string;
   problem?: string;
-  solution?: string;
   budgetRange?: string;
   timeline?: string;
 }): number {
@@ -322,8 +358,9 @@ export function scoreLead(a: {
   if (a.email) score += 1;
   if (a.company) score += 1;
   if (a.companySize && a.companySize >= 10) score += 1;
-  if (a.problem && a.problem.length > 10) score += 1;
-  if (a.solution && /automation|ai|customer support|support|agent/i.test(a.solution)) score += 2;
+  if (a.problem && a.problem.trim().length > 10) score += 1;
+  // An explicit support/automation need in the problem statement is a strong signal.
+  if (a.problem && /automation|ai|customer support|support|agent|helpdesk/i.test(a.problem)) score += 1;
   if (a.budgetRange && !/none|no budget/i.test(a.budgetRange)) score += 1;
   if (a.timeline) score += 1;
   return score;
@@ -334,8 +371,8 @@ export function leadScoreBreakdown(a: Record<string, unknown>): Record<string, n
     hasEmail: a.email ? 1 : 0,
     hasCompany: a.company ? 1 : 0,
     companySizeOk: a.companySize && (a.companySize as number) >= 10 ? 1 : 0,
-    problemDescribed: a.problem && String(a.problem).length > 10 ? 1 : 0,
-    solutionMatches: a.solution && /automation|ai|customer support|support|agent/i.test(String(a.solution)) ? 2 : 0,
+    problemDescribed: a.problem && String(a.problem).trim().length > 10 ? 1 : 0,
+    problemMatchesNeed: a.problem && /automation|ai|customer support|support|agent|helpdesk/i.test(String(a.problem)) ? 1 : 0,
     budgetKnown: a.budgetRange && !/none|no budget/i.test(String(a.budgetRange)) ? 1 : 0,
     timelineKnown: a.timeline ? 1 : 0,
   };

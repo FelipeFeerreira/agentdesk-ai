@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
+import { isDemoMode } from "@/lib/security/mode";
 
 /**
  * WhatsApp Cloud API integration.
@@ -81,8 +82,9 @@ export async function sendWhatsAppMessage(
   const token = process.env.WHATSAPP_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
-  if (!token || !phoneNumberId) {
-    // Demo mode — the message is already persisted locally by the agent.
+  // Demo mode never performs an external call, even if credentials are present.
+  if (isDemoMode() || !token || !phoneNumberId) {
+    // The message is already persisted locally by the agent.
     return { ok: true, demo: true, messageId: `wa_demo_${Date.now().toString(36)}` };
   }
 

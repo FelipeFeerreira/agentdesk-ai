@@ -1,6 +1,7 @@
 import { createHmac } from "crypto";
 import { prisma } from "@/lib/db";
 import type { AutomationEvent } from "./events";
+import { isDemoMode } from "@/lib/security/mode";
 
 export class N8nUnavailableError extends Error {
   constructor(message = "n8n webhook unavailable") {
@@ -28,7 +29,8 @@ export async function dispatchAutomationEvent(
   event: AutomationEvent,
 ): Promise<AutomationResult> {
   const url = process.env.N8N_WEBHOOK_URL;
-  if (!url) {
+  // Demo mode never performs an external call, even if a webhook is configured.
+  if (!url || isDemoMode()) {
     await prisma.auditLog.create({
       data: {
         orgId: event.organizationId,
