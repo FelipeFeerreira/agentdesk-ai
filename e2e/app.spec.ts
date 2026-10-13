@@ -49,3 +49,18 @@ test("sensitive refund above threshold escalates to a human", async ({ page }) =
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText(/above what I can approve/i)).toBeVisible({ timeout: 20_000 });
 });
+
+test("repeated identical messages are both answered (no duplicate error)", async ({ page }) => {
+  await page.goto("/chat");
+  const box = page.getByPlaceholder("Message the AI agent…");
+
+  await box.fill("Where is order #4582?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(/Order 4582/i).first()).toBeVisible({ timeout: 20_000 });
+
+  // Sending the exact same text again must work (not a duplicate rejection).
+  await box.fill("Where is order #4582?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText(/Order 4582/i)).toHaveCount(2, { timeout: 20_000 });
+  await expect(page.getByText(/something went wrong/i)).toHaveCount(0);
+});
