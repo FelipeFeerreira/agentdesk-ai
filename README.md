@@ -374,3 +374,9 @@ See the full documentation in [`docs/`](docs/):
 - [`integrations.md`](docs/integrations.md)
 - [`testing.md`](docs/testing.md)
 - [`case-study.md`](docs/case-study.md)
+
+---
+
+## License
+
+MIT - see [LICENSE](LICENSE). You may use, modify and redistribute this code with attribution.
