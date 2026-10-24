@@ -6,6 +6,13 @@ AgentDesk AI combines an AI agent with real tool calling, RAG knowledge retrieva
 
 > All screenshots below are **real captures** of the running application with seeded, non-sensitive demo data (see `docs/screenshots/`). The demo requires **no API keys**.
 
+| | |
+|:--|:--|
+| **Live demo** | None yet — run locally with seeded demo data |
+| **Screenshots** | [docs/screenshots](docs/screenshots) |
+| **Stack** | Next.js · React · TypeScript · PostgreSQL · Prisma · OpenAI tool calling · RAG · n8n |
+| **License** | MIT — [LICENSE](LICENSE) |
+
 ## Product walkthrough
 
 | Operations dashboard | Customer web chat (grounded answer) |
@@ -376,6 +383,12 @@ See the full documentation in [`docs/`](docs/):
 - [`case-study.md`](docs/case-study.md)
 
 ---
+
+## What I would do next
+
+- Deploy a public demo with the seeded workspace so reviewers can click through without cloning.
+- Swap the hash-based demo embeddings for a real embedding provider and track API cost per conversation.
+- Move the in-process job sweep to a Redis-backed queue and finish the Google Drive ingestion provider.
 
 ## License
 
