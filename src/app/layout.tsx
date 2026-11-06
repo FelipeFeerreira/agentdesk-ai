@@ -29,9 +29,31 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  const demoMode = process.env.DEMO_MODE !== "false";
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)]">
+        {demoMode ? (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              zIndex: 9999,
+              background: "#a15c00",
+              color: "#fff",
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: 0.3,
+              padding: "4px 10px",
+              textAlign: "center",
+            }}
+          >
+            DEMO — fictional customers, orders and conversations. Nothing here is a real business, and the
+            data resets on a schedule.
+          </div>
+        ) : null}
         {children}
       </body>
     </html>
