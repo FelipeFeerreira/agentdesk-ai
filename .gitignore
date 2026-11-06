@@ -53,3 +53,5 @@ next-env.d.ts
 
 # isolated test databases
 /prisma/.test-dbs/
+/server.log
+/.next

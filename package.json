@@ -15,7 +15,9 @@
     "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
     "prisma:pg:schema": "node scripts/generate-postgres-schema.mjs",
     "screenshots": "node scripts/capture-portfolio-screenshots.mjs",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "seed:demo": "tsx prisma/seed.ts",
+    "demo:reseed": "node scripts/reseed-demo.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -384,6 +384,24 @@ See the full documentation in [`docs/`](docs/):
 
 ---
 
+## Demo mode (public instance)
+
+The app ships with a self-contained demo profile: no LLM key, no CRM, no WhatsApp, no vector
+database. Everything runs on a deterministic provider over a seeded workspace (2 users, 1 org,
+5 conversations, 10 messages, 1 lead, 1 ticket, 6 knowledge chunks, 8 audit records).
+
+- `DEMO_MODE=true` turns on the banner and the guard rails; login: `admin@agentdesk.ai` / `admin123`.
+- Writes are limited to 40 per minute per IP (`src/middleware.ts`); the rest gets `429`.
+- The workspace resets on a schedule: `POST /api/demo/reseed` with `Authorization: Bearer $DEMO_RESEED_SECRET`
+  runs the same idempotent seed (`src/lib/seed/demo.ts`). Without the secret the route answers `404`.
+- Seed locally with `npm run seed:demo`; reseed a deployed instance with `npm run demo:reseed`.
+
+**Gotcha:** after `prisma db push --schema=prisma/schema.postgresql.prisma`, run
+`npx prisma generate` with the default schema again. Pushing the Postgres schema regenerates the
+Prisma Client for the wrong provider and the app starts returning 500 on login.
+
+Public demo: _link added after the first deploy_.
+
 ## What I would do next
 
 - Deploy a public demo with the seeded workspace so reviewers can click through without cloning.
